@@ -11,7 +11,6 @@ class Server:
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listening_socket.bind((self.dest_ip, self.port_listen))
-        self.transmitting_socket.bind((self.dest_ip, self.port_transmit))
 
         print("Server created successfully")
 

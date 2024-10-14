@@ -10,7 +10,6 @@ class Client:
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listening_socket.bind((self.dest_ip, self.port_listen))
-        self.transmitting_socket.bind((self.dest_ip, self.port_transmit))
 
         print("Client created successfully")
 
@@ -18,7 +17,7 @@ class Client:
         message = input("Send message: ")
         self.transmitting_socket.sendto(bytes(message, 'utf-8'), (self.dest_ip, self.port_transmit))
         print("Message sent successfully")
-        data = self.transmitting_socket.recv(1024)
+        data = self.listening_socket.recv(1024)
         print("Message received from server: %s" % data)
         return
         
