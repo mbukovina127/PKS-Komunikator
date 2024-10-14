@@ -7,8 +7,8 @@ class Client:
         self.dest_ip = ip
         self.port_listen = port_l
         self.port_transmit = port_t
-        self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listening_socket.bind((self.dest_ip, self.port_listen))
         self.transmitting_socket.bind((self.dest_ip, self.port_transmit))
 
