@@ -4,8 +4,8 @@ from server import Server
 
 if __name__ == '__main__':
 
-    print("Choose type...")
-    print("[S]erver / [C]lient")
+    print("Choose type - [S]erver / [C]lient")
+    print("")
     while True:
         program: str = input("")
         if (program.upper() in ['S', 'C']):

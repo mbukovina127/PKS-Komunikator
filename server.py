@@ -20,15 +20,24 @@ class Server:
     def send_packet(self, packet: Packet):
         self.transmitting_socket.sendto(packet.to_bytes(), (self.dest_ip, self.port_transmit))
 
+    # TODO: I dont know if it throws exception
+    def recv_packet(self, buffer_s) -> Packet:
+        data, addr = self.listening_socket.recvfrom(buffer_s)
+        pkt = Packet(data)
+        return pkt
 
     def init_connection(self):
         self.listening_socket.settimeout(60)
         print("Waiting to connect... 60s")
         # TODO: remove constant
-        rec_pkt, addr = self.listening_socket.recvfrom(1024)
-        rec_pkt = Packet(rec_pkt)
-        if (rec_pkt.flag != Flags.SYN.value):
-            print("Recived wrong message")
+        try:
+            rec_pkt, addr = self.listening_socket.recvfrom(1024)
+            rec_pkt = Packet(rec_pkt)
+            if (rec_pkt.flag != Flags.SYN.value):
+                print("Recived wrong message")
+        except socket.timeout:
+            print("Connection time out")
+            return
         while True:
             self.send_packet(Packet.build(flags=Flags.ACK.value))
             try:

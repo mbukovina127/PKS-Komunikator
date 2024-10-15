@@ -14,10 +14,8 @@ class Packet:
         self.data = data[1:]
 
     @staticmethod
-    def build(flags: bytes = 0, data: bytes = 0) -> 'Packet':
-        pkt = Packet(0)
-        pkt.flags = flags
-        pkt.data = data
+    def build(flags: bytes = bytes(0), data: bytes = bytes(0)) -> 'Packet':
+        pkt = Packet(bytes([flags, *data]))
         return pkt
 
     def to_bytes(self) -> bytes:

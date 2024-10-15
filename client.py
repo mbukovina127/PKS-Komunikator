@@ -38,6 +38,7 @@ class Client:
                 print("No reply... trying again")
 
         self.send_packet(Packet.build(flags=Flags.ACK.value))
+        print("Connection established")
         return
 
 
