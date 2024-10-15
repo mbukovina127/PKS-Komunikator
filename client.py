@@ -1,5 +1,7 @@
 import socket
 
+from packet import Packet, Flags
+
 from peer import Peer
 
 class Client:
@@ -13,7 +15,34 @@ class Client:
 
         print("Client created successfully")
 
+    def send_packet(self, packet: Packet):
+        self.transmitting_socket.sendto(packet.to_bytes(), (self.dest_ip, self.port_transmit))
+
+
     def init_connection(self):
+        sync_packet = Packet.build(flags=Flags.SYN.value)
+        # send sync packet
+        # expect ack packet
+        # send ack packet
+        self.listening_socket.settimeout(5)
+        while True:
+
+            self.send_packet(sync_packet)
+            # TODO: change buffer size
+            try:
+                data, addr = self.listening_socket.recvfrom(1024)
+                rec_pkt = Packet(data)
+                if (rec_pkt.flag == Flags.ACK.value):
+                    break;
+            except socket.timeout:
+                print("No reply... trying again")
+
+        self.send_packet(Packet.build(flags=Flags.ACK.value))
+        return
+
+
+
+    def init_connection_message(self):
         message = input("Send message: ")
         self.transmitting_socket.sendto(bytes(message, 'utf-8'), (self.dest_ip, self.port_transmit))
         print("Message sent successfully")

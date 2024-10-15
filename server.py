@@ -1,5 +1,8 @@
 import socket
 
+from setuptools.discovery import FlatLayoutModuleFinder
+
+from packet import Packet, Flags
 from peer import Peer
 
 
@@ -14,7 +17,34 @@ class Server:
 
         print("Server created successfully")
 
+    def send_packet(self, packet: Packet):
+        self.transmitting_socket.sendto(packet.to_bytes(), (self.dest_ip, self.port_transmit))
+
+
     def init_connection(self):
+        self.listening_socket.settimeout(60)
+        print("Waiting to connect... 60s")
+        # TODO: remove constant
+        rec_pkt, addr = self.listening_socket.recvfrom(1024)
+        rec_pkt = Packet(rec_pkt)
+        if (rec_pkt.flag != Flags.SYN.value):
+            print("Recived wrong message")
+        while True:
+            self.send_packet(Packet.build(flags=Flags.ACK.value))
+            try:
+                # TODO: remove constant
+                rec_pkt, addr = self.listening_socket.recvfrom(1024)
+                rec_pkt = Packet(rec_pkt)
+                if (rec_pkt.flag == Flags.ACK.value):
+                    print("Connection established")
+                    return
+            except socket.timeout:
+                print("No reply... trying again")
+        
+
+
+
+    def init_connection_message(self):
         print("Waiting for message")
         data = self.listening_socket.recv(1024)
         print("Message received: %s" % data)
