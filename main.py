@@ -13,8 +13,8 @@ if __name__ == '__main__':
             print("ERROR: incorect type")
 
     ip = input("IP address D[127.0.0.1]: ")
-    listening_port = input("Listening port D[50601]: ")
-    transmitting_port = input("Transmitting port D[50602]: ")
+    listening_port = input("[S]-Listening port / [C]-Transmitting port: def[50601] ")
+    transmitting_port = input("[S]-Transmitting port / [C]-Listening port:  def[50602] ")
     if (ip == ''):
         ip = "127.0.0.1"
     if (listening_port == ''):
@@ -27,7 +27,7 @@ if __name__ == '__main__':
         transmitting_port = int(transmitting_port)
 
     if (program.upper() == 'C'):
-        client = Client(ip, listening_port, transmitting_port)
+        client = Client(ip, transmitting_port, listening_port)
         client.launch()
     if (program.upper() == 'S'):
         server = Server(ip, listening_port, transmitting_port)
