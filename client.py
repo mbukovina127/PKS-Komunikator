@@ -1,4 +1,5 @@
 import socket
+import threading
 
 from packet import Packet, Flags
 
@@ -29,22 +30,14 @@ class Client(Peer):
         print("Connection established")
         return
 
-    def init_connection_message(self):
-        message = input("Send message: ")
-        self.transmitting_socket.sendto(bytes(message, 'utf-8'), (self.dest_ip, self.port_transmit))
-        print("Message sent successfully")
-        data = self.listening_socket.recv(1024)
-        print("Message received from server: %s" % data)
-        return
-        
-
     def launch(self):
         print("Client up")
         self.init_connection()
-
-
-        input("waity")
-        # super().init_termination()
-
+        listen_thread = threading.Thread(target=self.message_listen())
+        listen_thread.start()
+        message_thread = threading.Thread(target=self.message_handler())
+        message_thread.start()
+        input("wait")
+        self.quit()
 
 

@@ -43,22 +43,14 @@ class Server(Peer):
             except socket.timeout:
                 print("no reply... trying again")
 
-    def init_connection_message(self):
-        print("Waiting for message")
-        data = self.listening_socket.recv(1024)
-        print("Message received: %s" % data)
-        message = input("Message to reply with: ")
-        self.transmitting_socket.sendto(bytes(message, "utf-8"), (self.dest_ip, self.port_transmit))
-        print("Message sent")
-        return
-
     def launch(self):
         print("Server up")
         self.init_connection()
         # TODO: remove const
-        listen_thread = threading.Thread(target=self.listen, args=(1500,))
+        listen_thread = threading.Thread(target=self.message_listen())
         listen_thread.start()
-        print("hel")
+        message_thread = threading.Thread(target=self.message_handler())
+        message_thread.start()
         input("wait")
         self.quit()
 
