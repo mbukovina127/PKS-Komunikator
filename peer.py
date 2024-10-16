@@ -1,5 +1,5 @@
-from enum import Enum
-from packet import Packet
+
+from packet import Packet, Flags
 import asyncio
 import socket
 
@@ -18,29 +18,64 @@ class Peer:
     def send_packet(self, packet: Packet):
         self.transmitting_socket.sendto(packet.to_bytes(), (self.dest_ip, self.port_transmit))
 
-    def recieve_packet(self, buffer_s) -> Packet:
+    def recv_packet(self, buffer_s) -> Packet:
         data, addr = self.listening_socket.recvfrom(buffer_s)
+        pkt = Packet(data)
+        return pkt
+
+    def parse_packet(self, pkt: Packet):
+        print("pkt received")
+        match (pkt.flag):
+            case Flags.KEEP_ALIVE.value:
+                return
+            case Flags.SYN.value:
+                return
+            case Flags.ACK.value:
+                return
+            case Flags.FIN.value:
+                self.FIN_received()
+                return
+            case _:
+                return 
+
+    async def listen(self, buffer_s):
+        self.listening_socket.settimeout(60)
+        while True:
+            try:
+                rec_pkt = self.recv_packet(buffer_s)
+                self.parse_packet(rec_pkt)
+            except socket.timeout:
+                pass
+            except OSError:
+                return
 
 
 
-    def receive_message(self):
-        data = self.listening_socket.recv(1024)
-        packet = Packet(data)
-        self.parse_packet(packet)
+    def init_termination(self):
+        print("Terminating connection")
+        self.listening_socket.settimeout(5)
+        while True:
+            self.send_packet(Packet.build(flags=Flags.FIN.value))
+            try:
+                rec_pkt = self.recv_packet(1024)
+                # TODO: possible delayed packets
+                if (rec_pkt.flag == Flags.ACK.value):
+                    print("ACK received")
+                    self.quit()
+                    return
+            except socket.timeout:
+                pass
+            print("failed to terminate connection... trying again")
 
-
-
-
-    def launch(self):
-
-        asyncio.run(self.listen())
-        return
-
-    async def listen(self):
-        return
-
+    def FIN_received(self):
+        self.send_packet(Packet.build(flags=Flags.ACK.value))
+        self.quit()
+        
 
     def quit(self):
+        print("Closing connection...")
         self.listening_socket.close()
+        # print("Listening socket closed...")
         self.transmitting_socket.close()
-        print("INFO: Server offline...")
+        # print("Transmitting socket closed...")
+        print("Offline")
