@@ -63,11 +63,13 @@ class Peer:
                 return
 
     def message_listen(self):
-        self.listening_socket.settimeout(None)
+        self.listening_socket.settimeout(60)
         while True:
             try:
                 msg = self.recv_message(1500)
                 print(msg)
+            except socket.timeout:
+                pass
             except OSError:
                 return
 

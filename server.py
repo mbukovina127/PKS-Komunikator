@@ -49,8 +49,7 @@ class Server(Peer):
         # TODO: remove const
         listen_thread = threading.Thread(target=self.message_listen())
         listen_thread.start()
-        message_thread = threading.Thread(target=self.message_handler())
-        message_thread.start()
+        self.message_handler()
         input("wait")
         self.quit()
 
