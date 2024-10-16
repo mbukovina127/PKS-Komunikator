@@ -1,16 +1,19 @@
+import threading
 
 from packet import Packet, Flags
 import asyncio
 import socket
 
 class Peer:
-    def __init__(self, ip, port_l, port_t):
-        self.dest_ip = ip
-        self.port_listen = port_l
-        self.port_transmit = port_t
+    def __init__(self):
+        self.dest_ip = ""
+        self.port_listen = 0
+        self.port_transmit = 0
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listening_socket.settimeout(60)
+
+
 
 
     def send_message(self, message: str):
@@ -101,3 +104,68 @@ class Peer:
         self.transmitting_socket.close()
         # print("Transmitting socket closed...")
         print("Offline")
+
+
+    def conn_listener(self, l_port):
+        self.port_listen = l_port
+        self.listening_socket.bind(('0.0.0.0', self.port_listen))
+
+        self.listening_socket.settimeout(60)
+        while True:
+            try:
+                print("Waiting...")
+                # TODO: remove constant
+                rec_pkt_data, addr = self.listening_socket.recvfrom(1500)
+                rec_pkt = Packet(rec_pkt_data)
+
+                if (rec_pkt.flag == Flags.SYN.value):
+                    break
+                self.dest_ip = addr[0]
+                # TODO: I could change the sockets
+            except socket.timeout:
+                print("Connection timed out")
+                return False
+            print("SYN received... ", end="")
+            self.send_packet(Packet.build(flags=Flags.ACK.value))
+            print("ACK sent... ", end="")
+            try:
+                # TODO: remove constant
+                rec_pkt = self.recv_packet(1024)
+                if (rec_pkt.flag == Flags.ACK.value):
+                    print("Connection established")
+                    return True
+                else:
+                    print("Connection lost")
+            except socket.timeout:
+                print("no reply... trying again")
+
+    def conn_initializer(self,):
+
+        print("Establishing connection..", end="")
+        self.listening_socket.settimeout(5)
+        sync_packet = Packet.build(flags=Flags.SYN.value)
+        while True:
+
+            self.send_packet(sync_packet)
+            # TODO: change buffer size
+            try:
+                rec_pkt = self.recv_packet(1024)
+                if (rec_pkt.flag == Flags.ACK.value):
+                    break
+            except socket.timeout:
+                print('.', end="")
+                pass
+
+        self.send_packet(Packet.build(flags=Flags.ACK.value))
+        print("\nConnection established")
+        self.listening_socket.settimeout(60)
+        return True
+
+    def communicate(self):
+        listening = threading.Thread(target=self.message_listen())
+        messaging = threading.Thread(target=self.message_handler())
+        listening.start()
+        messaging.start()
+
+        listening.join()
+        messaging.join()
