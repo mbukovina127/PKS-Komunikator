@@ -149,7 +149,6 @@ class Peer:
             # TODO: change buffer size
             try:
                 rec_pkt = self.recv_packet(1024)
-                print("recieved packet... ", end="")
                 if (rec_pkt.flag == Flags.ACK.value):
                     break
             except socket.timeout:
