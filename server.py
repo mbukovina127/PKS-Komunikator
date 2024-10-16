@@ -1,7 +1,6 @@
 import asyncio
 import socket
-
-from setuptools.discovery import FlatLayoutModuleFinder
+import threading
 
 from packet import Packet, Flags
 from peer import Peer
@@ -10,28 +9,34 @@ from peer import Peer
 class Server(Peer):
     def __init__(self, ip, port_l, port_t):
         super().__init__(ip, port_l, port_t)
+        self.dest_ip = '0.0.0.0'
+        self.listening_socket.bind(('0.0.0.0', self.port_listen))
         print("Server created successfully")
 
     def init_connection(self):
-        self.listening_socket.settimeout(60)
         print("Waiting to connect... 60s")
         try:
             # TODO: remove constant
-            rec_pkt = super().recv_packet(1024)
+            rec_pkt_data, addr = self.listening_socket.recvfrom(1500)
+            rec_pkt = Packet(rec_pkt_data)
+
             if (rec_pkt.flag != Flags.SYN.value):
                 print("Received wrong message")
                 return
+
+            self.dest_ip = addr[0]
+            # TODO: I could change the sockets
+
         except socket.timeout:
             print("Connection time out")
             return
         print("SYN received... ", end="")
-        self.listening_socket.settimeout(5)
         while True:
             self.send_packet(Packet.build(flags=Flags.ACK.value))
             print("ACK sent... ", end="")
             try:
                 # TODO: remove constant
-                rec_pkt = super().recv_packet(1024)
+                rec_pkt = self.recv_packet(1024)
                 if (rec_pkt.flag == Flags.ACK.value):
                     print("Connection established")
                     return
@@ -51,8 +56,10 @@ class Server(Peer):
         print("Server up")
         self.init_connection()
         # TODO: remove const
-        asyncio.run(self.listen(1024))
-
-        super().quit()
+        listen_thread = threading.Thread(target=self.listen, args=(1500,))
+        listen_thread.start()
+        print("hel")
+        input("wait")
+        self.quit()
 
 

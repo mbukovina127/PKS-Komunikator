@@ -7,18 +7,18 @@ from peer import Peer
 class Client(Peer):
     def __init__(self, ip, port_l, port_t):
         super().__init__(ip, port_l, port_t)
+        self.listening_socket.bind(('0.0.0.0', self.port_listen))
         print("Client created successfully")
 
     def init_connection(self):
         sync_packet = Packet.build(flags=Flags.SYN.value)
-        self.listening_socket.settimeout(5)
         while True:
 
             self.send_packet(sync_packet)
             print("SYN sent... ", end="")
             # TODO: change buffer size
             try:
-                rec_pkt = super().recv_packet(1024)
+                rec_pkt = self.recv_packet(1024)
                 if (rec_pkt.flag == Flags.ACK.value):
                     print("ACK received")
                     break
@@ -42,7 +42,9 @@ class Client(Peer):
         print("Client up")
         self.init_connection()
 
-        super().init_termination()
+
+        input("waity")
+        # super().init_termination()
 
 
 

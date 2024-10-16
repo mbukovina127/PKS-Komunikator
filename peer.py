@@ -10,10 +10,11 @@ class Peer:
         self.port_transmit = port_t
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.listening_socket.bind((self.dest_ip, self.port_listen))
+        self.listening_socket.settimeout(60)
+
 
     def send_message(self, message):
-        self.transmitting_socket.sendto( bytes(message), self.dest_ip)
+        self.transmitting_socket.sendto( bytes(message), (self.dest_ip, self.port_transmit))
 
     def send_packet(self, packet: Packet):
         self.transmitting_socket.sendto(packet.to_bytes(), (self.dest_ip, self.port_transmit))
@@ -38,7 +39,7 @@ class Peer:
             case _:
                 return 
 
-    async def listen(self, buffer_s):
+    def listen(self, buffer_s):
         self.listening_socket.settimeout(60)
         while True:
             try:
