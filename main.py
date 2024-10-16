@@ -23,13 +23,10 @@ if __name__ == '__main__':
         if (inp == 'y'):
             ip = input("IP address to connect def[127.0.0.1]: ")
 
-
             if (ip == ''):
                 ip = "127.0.0.1"
 
             app.dest_ip = ip
-            app.port_transmit = transmitting_port
-
 
             if (app.conn_initializer()):
                 break

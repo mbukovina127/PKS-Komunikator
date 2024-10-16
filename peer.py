@@ -11,6 +11,7 @@ class Peer:
         self.port_transmit = 0
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.listening_socket.bind(('0.0.0.0', self.port_listen))
         self.listening_socket.settimeout(60)
 
 
@@ -116,7 +117,6 @@ class Peer:
 
                 if (rec_pkt.flag == Flags.SYN.value):
                     self.dest_ip = addr[0]
-                    print(str(self.port_transmit))
                 else:
                     return False
                 # TODO: I could change the sockets
