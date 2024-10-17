@@ -1,3 +1,3 @@
 Marko Bukovina 
 
-PKS 2024 (helper: Filip Brutovský)
+PKS 2024 (tester: Filip Brutovský)
