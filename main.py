@@ -16,6 +16,8 @@ if __name__ == '__main__':
     else:
         transmitting_port = int(transmitting_port)
 
+    app.port_transmit = transmitting_port
+
     while True:
         print("Do you want to initialize connection to a peer: [y]es I want to / [n]o I want to wait for incoming connection")
         inp = input()

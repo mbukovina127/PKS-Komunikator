@@ -148,7 +148,7 @@ class Peer:
             self.send_packet(sync_packet)
             # TODO: change buffer size
             try:
-                rec_pkt = self.recv_packet(1024)
+                rec_pkt = self.recv_packet(1500)
                 if (rec_pkt.flag == Flags.ACK.value):
                     break
             except socket.timeout:
