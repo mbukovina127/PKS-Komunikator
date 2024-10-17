@@ -140,7 +140,7 @@ class Peer:
 
     def conn_initializer(self):
 
-        print("Establishing connection..", end="")
+        print("Establishing connection..")
         self.listening_socket.settimeout(5)
         sync_packet = Packet.build(flags=Flags.SYN.value)
         while True:
