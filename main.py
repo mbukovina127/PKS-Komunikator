@@ -47,6 +47,7 @@ if __name__ == '__main__':
                 print("Couldn't establish connection")
         else:
             print("Invalid input")
-
-    app.communicate()
-
+    try:
+        app.communicate()
+    except KeyboardInterrupt:
+        app.quit()

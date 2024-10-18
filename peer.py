@@ -12,7 +12,9 @@ class Peer:
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listening_socket.bind(('0.0.0.0', self.port_listen))
+
         self.listening_socket.settimeout(60)
+        self.c_running = True
 
 
 
@@ -34,10 +36,10 @@ class Peer:
         return pkt
 
     def message_handler(self):
-        while True:
-            inp = input("Send message: ")
+        while self.c_running:
+            inp = input()
             if (inp == "quit"):
-                return
+                self.quit()
             self.send_message(inp)
 
     def parse_packet(self, pkt: Packet):
@@ -57,7 +59,7 @@ class Peer:
 
     def listen(self, buffer_s):
         self.listening_socket.settimeout(60)
-        while True:
+        while self.c_running:
             try:
                 rec_pkt = self.recv_packet(buffer_s)
                 self.parse_packet(rec_pkt)
@@ -67,13 +69,13 @@ class Peer:
                 return
 
     def message_listen(self):
-        self.listening_socket.settimeout(60)
-        while True:
+        self.listening_socket.settimeout(None)
+        while self.c_running:
             try:
-                msg = self.recv_message(1500)
-                print(msg)
-            except socket.timeout:
-                pass
+                msg, addr = self.listening_socket.recvfrom(1500)
+                print("Received: %s"  %msg)
+            except KeyboardInterrupt:
+                quit()
             except OSError:
                 return
 
@@ -100,6 +102,7 @@ class Peer:
 
     def quit(self):
         print("Closing connection...")
+        self.c_running = False
         self.listening_socket.close()
         # print("Listening socket closed...")
         self.transmitting_socket.close()
@@ -161,10 +164,13 @@ class Peer:
         return True
 
     def communicate(self):
-        listening = threading.Thread(target=self.message_listen())
-        messaging = threading.Thread(target=self.message_handler())
+        listening = threading.Thread(target=self.message_listen)
+        messaging = threading.Thread(target=self.message_handler)
         listening.start()
         messaging.start()
 
+
+        print("You can now send messages")
         listening.join()
         messaging.join()
+
