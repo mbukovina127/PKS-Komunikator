@@ -10,7 +10,7 @@ class Server(Peer):
     def __init__(self, ip, port_l, port_t):
         super().__init__(ip, port_l, port_t)
         self.dest_ip = '0.0.0.0'
-        self.listening_socket.bind(('0.0.0.0', self.port_listen))
+        self.listening_socket.bind(('0.0.0.0', self.listen_port))
         print("Server created successfully")
 
     def init_connection(self):

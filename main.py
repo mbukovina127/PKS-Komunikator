@@ -1,6 +1,9 @@
+import threading
+
 from client import Client
 from server import Server
 from peer import Peer
+
 if __name__ == '__main__':
     listening_port = input("Listening port def[50601]: ")
     if (listening_port == ''):
@@ -8,45 +11,37 @@ if __name__ == '__main__':
     else:
         listening_port = int(listening_port)
 
-    app = Peer(listening_port)
     transmitting_port = input("Transmitting port def[50602]: ")
+
 
     if (transmitting_port == ''):
         transmitting_port = 50602
     else:
         transmitting_port = int(transmitting_port)
 
-    app.port_transmit = transmitting_port
+
+    ip = input("IP address to connect def[127.0.0.1]: ")
+
+    if (ip == ''):
+        ip = "127.0.0.1"
+
+    app = Peer(listening_port)
+    app.dest_port = transmitting_port
+    app.dest_ip = ip
 
 
-    while True:
-        print("Do you want to initialize connection to a peer: [y]es I want to / [n]o I want to wait for incoming connection")
-        inp = input()
 
-        if (inp == 'y'):
-            ip = input("IP address to connect def[127.0.0.1]: ")
-
-            if (ip == ''):
-                ip = "127.0.0.1"
-
-            app.dest_ip = ip
+    ### start of thread
+    init_listen = threading.Thread(target=app.init_listen)
+    init_connection = threading.Thread(target=app.init_transmit)
+    init_listen.start()
+    init_connection.start()
 
 
-            if (app.conn_initializer()):
-                break
-            else:
-                print("Couldn't establish connection")
-
-        elif (inp == 'n'):
-
-            app.port_transmit = transmitting_port
-
-            if (app.conn_listener()):
-                break
-            else:
-                print("Couldn't establish connection")
-        else:
-            print("Invalid input")
+    init_listen.join()
+    print("Connection established")
+    init_connection.join()
+    print("Im here")
     try:
         app.communicate()
     except KeyboardInterrupt:

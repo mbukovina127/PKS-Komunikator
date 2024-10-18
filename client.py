@@ -10,7 +10,7 @@ from peer import Peer
 class Client(Peer):
     def __init__(self, ip, port_l, port_t):
         super().__init__(ip, port_l, port_t)
-        self.listening_socket.bind(('0.0.0.0', self.port_listen))
+        self.listening_socket.bind(('0.0.0.0', self.listen_port))
         print("Client created successfully")
 
     def init_connection(self):
