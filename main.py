@@ -39,7 +39,7 @@ if __name__ == '__main__':
 
 
     init_listen.join()
-    print("Connection established")
+    print("Connection established. press enter")
     init_connection.join()
 
     try:

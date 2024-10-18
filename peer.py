@@ -1,5 +1,6 @@
 import threading
 import time
+from sys import flags
 
 from packet import Packet, Flags
 import asyncio
@@ -16,12 +17,14 @@ class Peer:
 
         self.listening_socket.settimeout(60)
         self.c_running = True
-        self.syn_send_received = False
         self.CONNECTION = False
+        self.syn_send_received = False
+        self.fin_send = False
 
 
 
 
+    ### PACKET FUNCTIONS
 
     def send_packet(self, packet: Packet):
         self.transmitting_socket.sendto(packet.to_bytes(), (self.dest_ip, self.dest_port))
@@ -31,21 +34,6 @@ class Peer:
         pkt = Packet(data)
         return pkt
 
-    def message_send(self, message: str):
-        self.transmitting_socket.sendto(Packet.build(Flags.MSG.value, message.encode()).to_bytes(), (self.dest_ip, self.dest_port))
-
-    def message_handler(self):
-        while self.CONNECTION:
-            inp = input()
-            if (inp == "quit"):
-                self.init_termination()
-            self.message_send(inp)
-
-    def message_parse(self, packet: Packet):
-        if packet.flag != Flags.MSG.value:
-            return "Incorrect packet received"
-        return packet.data.decode("utf-8")
-
     def parse_packet(self, pkt: Packet):
         print("pkt received")
         match (pkt.flag):
@@ -54,6 +42,8 @@ class Peer:
             case Flags.SYN.value:
                 return
             case Flags.ACK.value:
+                if (self.fin_send == True):
+                    quit()
                 return
             case Flags.FIN.value:
                 self.FIN_received()
@@ -62,7 +52,28 @@ class Peer:
                 print(self.message_parse(pkt))
                 return
             case _:
-                return 
+                return
+
+    ### MESSAGING FUNCTIONS
+
+    def message_send(self, message: str):
+        self.transmitting_socket.sendto(Packet.build(Flags.MSG.value, message.encode()).to_bytes(), (self.dest_ip, self.dest_port))
+
+
+    def message_parse(self, packet: Packet):
+        if packet.flag != Flags.MSG.value:
+            return "Incorrect packet received"
+        return packet.data.decode("utf-8")
+
+    ### THREAD FUNCTIONS
+
+    def message_handler(self):
+        while self.CONNECTION:
+            inp = input()
+            if (inp == "quit"):
+                self.init_termination()
+                return
+            self.message_send(inp)
 
     def listen(self, buffer_s):
         self.listening_socket.settimeout(60)
@@ -75,37 +86,17 @@ class Peer:
             except OSError:
                 return
 
-    def message_listen(self):
-        self.listening_socket.settimeout(None)
-        while self.c_running:
-            try:
-                msg, addr = self.listening_socket.recvfrom(1500)
-                print("Received: %s"  %msg)
-            except KeyboardInterrupt:
-                quit()
-            except OSError:
-                return
-
     def init_termination(self):
         print("Terminating connection")
-        self.listening_socket.settimeout(5)
-        while True:
-            self.send_packet(Packet.build(flags=Flags.FIN.value))
-            try:
-                rec_pkt = self.recv_packet(1500)
-                # TODO: possible delayed packets
-                if (rec_pkt.flag == Flags.ACK.value):
-                    print("ACK received")
-                    self.quit()
-                    return
-            except socket.timeout:
-                pass
-            print("failed to terminate connection... trying again")
+        self.send_packet(Packet.build(flags=Flags.FIN.value))
+        self.fin_send = True
 
     def FIN_received(self):
+        self.send_packet(Packet.build(flags=Flags.FIN.value))
+        time.sleep(0.2)
         self.send_packet(Packet.build(flags=Flags.ACK.value))
         self.quit()
-        
+
 
     def quit(self):
         print("Closing connection...")
@@ -115,6 +106,8 @@ class Peer:
         self.transmitting_socket.close()
         # print("Transmitting socket closed...")
         print("Offline")
+
+    ### HANDSHAKE FUNCTIONS
 
     def init_listen(self):
         print("Waiting for connection")
