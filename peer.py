@@ -17,18 +17,11 @@ class Peer:
         self.listening_socket.settimeout(60)
         self.c_running = True
         self.syn_send_received = False
-        self.conn_esta = False
+        self.CONNECTION = False
 
 
 
 
-    def send_message(self, message: str):
-        self.transmitting_socket.sendto(message.encode(), (self.dest_ip, self.dest_port))
-
-    def recv_message(self, buffer_s):
-        data, addr = self.listening_socket.recvfrom(buffer_s)
-        message = data.decode()
-        return message
 
     def send_packet(self, packet: Packet):
         self.transmitting_socket.sendto(packet.to_bytes(), (self.dest_ip, self.dest_port))
@@ -38,12 +31,20 @@ class Peer:
         pkt = Packet(data)
         return pkt
 
+    def message_send(self, message: str):
+        self.transmitting_socket.sendto(Packet.build(Flags.MSG.value, message.encode()).to_bytes(), (self.dest_ip, self.dest_port))
+
     def message_handler(self):
-        while self.c_running:
+        while self.CONNECTION:
             inp = input()
             if (inp == "quit"):
-                self.quit()
-            self.send_message(inp)
+                self.init_termination()
+            self.message_send(inp)
+
+    def message_parse(self, packet: Packet):
+        if packet.flag != Flags.MSG.value:
+            return "Incorrect packet received"
+        return packet.data.decode("utf-8")
 
     def parse_packet(self, pkt: Packet):
         print("pkt received")
@@ -57,12 +58,15 @@ class Peer:
             case Flags.FIN.value:
                 self.FIN_received()
                 return
+            case Flags.MSG.value:
+                print(self.message_parse(pkt))
+                return
             case _:
                 return 
 
     def listen(self, buffer_s):
         self.listening_socket.settimeout(60)
-        while self.c_running:
+        while self.CONNECTION:
             try:
                 rec_pkt = self.recv_packet(buffer_s)
                 self.parse_packet(rec_pkt)
@@ -88,7 +92,7 @@ class Peer:
         while True:
             self.send_packet(Packet.build(flags=Flags.FIN.value))
             try:
-                rec_pkt = self.recv_packet(1024)
+                rec_pkt = self.recv_packet(1500)
                 # TODO: possible delayed packets
                 if (rec_pkt.flag == Flags.ACK.value):
                     print("ACK received")
@@ -105,7 +109,7 @@ class Peer:
 
     def quit(self):
         print("Closing connection...")
-        self.c_running = False
+        self.CONNECTION = False
         self.listening_socket.close()
         # print("Listening socket closed...")
         self.transmitting_socket.close()
@@ -126,7 +130,7 @@ class Peer:
                 continue
             if (rec_pkt.flag == Flags.ACK.value and self.syn_send_received):
                 self.send_packet(Packet.build(flags=Flags.ACK.value))
-                self.conn_esta = True
+                self.CONNECTION = True
                 return
             if (rec_pkt.flag == Flags.SYN.value and not self.syn_send_received):
                 self.send_packet(Packet.build(flags=Flags.ACK.value))
@@ -136,22 +140,22 @@ class Peer:
             print("Connection lost")
 
     def init_transmit(self):
-        while not self.conn_esta:
+        while not self.CONNECTION:
             print("Press enter to try to connect")
             input()
-            if (self.conn_esta):
+            if (self.CONNECTION):
                 return
-            if not self.syn_send_received and not self.conn_esta:
+            if not self.syn_send_received and not self.CONNECTION:
                 self.send_packet(Packet.build(flags=Flags.SYN.value))
                 self.syn_send_received = True
                 print("Establishing connection...")
-            while self.syn_send_received and not self.conn_esta:
+            while self.syn_send_received and not self.CONNECTION:
                 time.sleep(1)
 
 
 
     def communicate(self):
-        listening = threading.Thread(target=self.message_listen)
+        listening = threading.Thread(target=self.listen, args=(1500,))
         messaging = threading.Thread(target=self.message_handler)
         listening.start()
         messaging.start()

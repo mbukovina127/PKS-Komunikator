@@ -6,6 +6,7 @@ class Flags(Enum):
     ACK = 2
     KEEP_ALIVE = 3
     FIN = 4
+    MSG = 11
 
 
 class Packet:

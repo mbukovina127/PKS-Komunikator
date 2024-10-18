@@ -41,8 +41,8 @@ if __name__ == '__main__':
     init_listen.join()
     print("Connection established")
     init_connection.join()
-    print("Im here")
+
     try:
         app.communicate()
     except KeyboardInterrupt:
-        app.quit()
+        app.init_termination()
