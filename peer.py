@@ -7,22 +7,22 @@ import asyncio
 import socket
 
 class Peer:
-    def __init__(self, port_lst):
-        self.dest_ip = ""
+    def __init__(self, port_lst, port_trs, ip):
+        ### connection variables
+        self.dest_ip = ip
         self.listen_port = port_lst
-        self.dest_port = 0
+        self.dest_port = port_trs
+
+        ### socket setup
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.listening_socket.bind(('0.0.0.0', self.listen_port))
-
         self.listening_socket.settimeout(60)
-        self.c_running = True
+
+        ### aync variables
         self.CONNECTION = False
         self.syn_send_received = False
         self.fin_send = False
-
-
-
 
     ### PACKET FUNCTIONS
 
@@ -56,10 +56,6 @@ class Peer:
 
     ### MESSAGING FUNCTIONS
 
-    def message_send(self, message: str):
-        self.transmitting_socket.sendto(Packet.build(Flags.MSG.value, message.encode()).to_bytes(), (self.dest_ip, self.dest_port))
-
-
     def message_parse(self, packet: Packet):
         if packet.flag != Flags.MSG.value:
             return "Incorrect packet received"
@@ -73,7 +69,8 @@ class Peer:
             if (inp == "quit"):
                 self.init_termination()
                 return
-            self.message_send(inp)
+            if self.CONNECTION:
+                self.send_packet(Packet.build(Flags.MSG.value, inp.encode('utf-8')))
 
     def listen(self, buffer_s):
         self.listening_socket.settimeout(60)
@@ -102,15 +99,13 @@ class Peer:
         print("Closing connection...")
         self.CONNECTION = False
         self.listening_socket.close()
-        # print("Listening socket closed...")
         self.transmitting_socket.close()
-        # print("Transmitting socket closed...")
         print("Offline")
 
     ### HANDSHAKE FUNCTIONS
 
     def init_listen(self):
-        print("Waiting for connection")
+        print("Waiting for connection...")
         self.listening_socket.settimeout(10)
         while True:
             try:
@@ -136,7 +131,9 @@ class Peer:
         while not self.CONNECTION:
             print("Press enter to try to connect")
             input()
-            if (self.CONNECTION):
+            # Don't send packet if connection is established
+            # TODO: possible fix with the sleep loop
+            if self.CONNECTION:
                 return
             if not self.syn_send_received and not self.CONNECTION:
                 self.send_packet(Packet.build(flags=Flags.SYN.value))
@@ -152,9 +149,8 @@ class Peer:
         messaging = threading.Thread(target=self.message_handler)
         listening.start()
         messaging.start()
-
-
         print("You can now send messages")
+
         listening.join()
         messaging.join()
 

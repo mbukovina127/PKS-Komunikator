@@ -1,7 +1,5 @@
 import threading
 
-from client import Client
-from server import Server
 from peer import Peer
 
 if __name__ == '__main__':
@@ -25,11 +23,7 @@ if __name__ == '__main__':
     if (ip == ''):
         ip = "127.0.0.1"
 
-    app = Peer(listening_port)
-    app.dest_port = transmitting_port
-    app.dest_ip = ip
-
-
+    app = Peer(listening_port, transmitting_port, ip)
 
     ### start of thread
     init_listen = threading.Thread(target=app.init_listen)
