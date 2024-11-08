@@ -3,10 +3,10 @@ Marko Bukovina
 PKS 2024 (tester: Filip Brutovský)
 
 ## Completion
--[x] Connection
-  -[x] TCP handshake
-  -[x] Keep Alive
--[x] Menu
+- [x] Connection
+  - [x] TCP handshake
+  - [x] Keep Alive
+- [x] Menu
 
 ### 2. - 3. Prenos textu/súboru - fragmentácia
 - [ ] Menu funkcionalita
