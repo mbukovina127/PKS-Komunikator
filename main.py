@@ -33,8 +33,8 @@ if __name__ == '__main__':
 
 
     init_listen.join()
-    print("INFO: Connection established. press enter")
-    init_connection.join()
+    init_connection.join(0)
+    print("INFO: Connection established")
 
     try:
         app.communicate()

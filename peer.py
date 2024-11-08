@@ -1,16 +1,24 @@
 import random
 import threading
 import time
+from enum import Enum
 from sys import flags
 
 from packet import Packet, Flags
 import asyncio
 import socket
 
+class State(Enum):
+    Exit = 0
+    Halt = 1
+    InMenu = 2
+    SendMessage = 3
+    SendFile = 4
+
+
 class Peer:
     def __init__(self, port_lst, port_trs, ip):
         ### connection variables
-        self.pulse = 3
         self.dest_ip = ip
         self.listen_port = port_lst
         self.dest_port = port_trs
@@ -25,11 +33,19 @@ class Peer:
         self.CONNECTION = False
         self.syn_send_received = False
         self.fin_send = False
-        self.menu_on = True
+
+    ### menu functionality
+        self.Halt = asyncio.Event()
 
     ### sequence numbers
         self.current_seq = 0
+        self.current_fallback = 0
         self.expect_seq = 0
+        self.expect_fallback = 0
+
+    ### Keep Alive
+        self.KA_time = 15
+        self.pulse = 3
 
     ### files
         self.frag_size = 7 + 1465
@@ -45,17 +61,36 @@ class Peer:
         return pkt
 
     def update_expected(self, offset: int = 1):
+        self.expect_fallback = self.expect_seq
         self.expect_seq += offset
         return self.expect_seq
-    def update_current(self, offset:int = 1):
+
+    def update_current(self, offset: int = 1):
+        self.current_fallback = self.current_seq
         self.current_seq += offset
         return self.current_seq
+
+### Message function
+
+    async def send_message(self):
+        inp = input("Write message [--quit]: ")
+        if not inp.strip() or inp.lower() == "--quit":
+            return True
+        if self.CONNECTION:
+            self.send_packet(Packet.build(Flags.MSG.value, self.expect_seq, inp.encode()))
+            print("INFO: Message sent")
+            return True
+        else:
+            print("ERROR: No connection")
+            return False
+
+### Packet parser
 
     def parse_packet(self, pkt: Packet):
         # print("pkt received")
         match (pkt.flag):
             case Flags.KEEP_ALIVE.value:
-                print("DBG: KEEP ALIVE rec")
+                # print("DBG: KEEP ALIVE rec")
                 self.pulse = 3
                 return
             case Flags.ACK.value:
@@ -63,11 +98,14 @@ class Peer:
                     quit()
                 return
             case Flags.STR.value:
+                self.Halt.set()
                 self.incoming_file(pkt)
                 return
             case Flags.FRAG.value:
                 return
             case Flags.FRAG_F.value:
+                # DO SOMETHING
+                self.Halt.clear()
                 return
             case Flags.MSG.value:
                 print(pkt.data.decode("utf-8"))
@@ -75,21 +113,10 @@ class Peer:
             case Flags.FIN.value:
                 self.FIN_received()
                 return
-            # case Flags.SYN.value:
-            #     return
             case _:
                 return
 
 ### THREAD FUNCTIONS
-
-    def message_handler(self):
-        while self.CONNECTION:
-            inp = input()
-            if (inp == "quit"):
-                self.init_termination()
-                return
-            if self.CONNECTION:
-                self.send_packet(Packet.build(Flags.MSG.value, sequence_number=self.current_seq, data=inp.encode('utf-8')))
 
     def LISTENER(self, buffer_s):
         self.listening_socket.settimeout(60)
@@ -103,6 +130,8 @@ class Peer:
                 return
         self.quit()
 
+### Terminating fucntions
+
     def init_termination(self):
         print("INFO: Terminating connection")
         self.send_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.current_seq))
@@ -113,7 +142,6 @@ class Peer:
         time.sleep(0.2)
         self.send_packet(Packet.build(flags=Flags.ACK.value))
         self.quit()
-
 
     def quit(self):
         print("INFO: Closing connection...")
@@ -132,17 +160,15 @@ class Peer:
                 return
             self.pulse -= 1
             self.heart_beat()
-            print("DBG: heart beat sent")
-            time.sleep(5)
-
-
+            # print("DBG: heart beat sent")
+            time.sleep(self.KA_time)
 
     def heart_beat(self):
         ka_pkt = Packet.build(flags=Flags.KEEP_ALIVE.value)
         self.transmitting_socket.sendto(ka_pkt.to_bytes(), (self.dest_ip, self.dest_port))
 
 ### HANDSHAKE FUNCTIONS
-
+    # TODO: could move the 10s timeout into another thread
     def init_listen(self):
         print("INFO: Waiting for connection...")
         self.listening_socket.settimeout(10)
@@ -157,8 +183,8 @@ class Peer:
                 continue
             #we received syn packet without sending one
             if (rec_pkt.flag == Flags.SYN.value and not self.syn_send_received):
-                print("DBG: syn received first seq ==")
                 self.expect_seq = rec_pkt.sequence_number
+                print("DBG: syn received first seq ==", end="")
                 print(self.expect_seq)
                 self.current_seq = random.randint(1,900)
                 if self.current_seq == self.expect_seq:
@@ -177,8 +203,10 @@ class Peer:
                 print("DBG: ack received after syn received first")
                 if rec_pkt.sequence_number == (self.current_seq + 1):
                     self.CONNECTION = True
+                    self.update_current()
                     return
-                print ("DBG: seq doesn't match")
+
+                print ("DBG: seq doesn't match ", end="")
                 print(rec_pkt.sequence_number, self.current_seq + 1)
             #we send syn packet first
             if rec_pkt.flag == Flags.SYN.value and self.syn_send_received:
@@ -193,6 +221,7 @@ class Peer:
                         if ack_pkt.sequence_number == self.current_seq +1: # it has to have seq +1 of the one we sent
                             self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.update_expected())) # we send ack for the one we received
                             self.CONNECTION = True
+                            self.update_current()
                             return
                         print("DBG: seq doesn't match")
                         print(ack_pkt.sequence_number, self.current_seq +1)
@@ -217,6 +246,8 @@ class Peer:
                 time.sleep(1)
 
 
+### MAIN ###
+
     def communicate(self):
         listening = threading.Thread(target=self.LISTENER, args=(1500,))
         keep_alive = threading.Thread(target=self.keep_alive)
@@ -224,46 +255,77 @@ class Peer:
         keep_alive.start()
         print("You can now send messages")
 
-        menu = threading.Thread(target=self.menu)
-        menu.start()
+        asyncio.run(self.menu())
 
+
+        # TODO: how the fuck do I remake this into an observer
+        # TODO: I need a thread for menu because I need to cancel the input waiting if something comes up
+        # TODO: I need a way for a listner to comunicate with menu in case a file arrives
+        # when state is changed what should I update
+        # lets have a function update that updates the state machine after that it calls the update switch which checks what to do
+        # if halt happens it turns off menu thread
+        # if exit happens the same thing as before and terminates connection
+        # if menu state is there it should start the menu thread
+        # in menu thread it can call the send msg and send file state and exit state
+        # but I can't call the update inside the menu because it would need to terminate it's own thread
+        # but I can't terminate the menu with halt and exit flag with no worry
+        # and I could terminate the menu with send msg and send file by changing the variable and then exiting the function into the updater
+        # but how the fuck do I do that if I call the updater only when I switch states I should stay at that state until I switch it
+        #
+
+        listening.join()
+
+
+### Menu
+    async def menu(self):
         while self.CONNECTION:
-            if not self.menu_on and menu.is_alive():
-                menu.join(0)
-            time.sleep(1)
-        print("DBG: jumped from loop")
-        if not self.CONNECTION:
-            if menu.is_alive():
-                menu.join(timeout=0)
+            if self.Halt.is_set():
+                await self.Halt.wait()
+            else:
+                print("Choose option:")
+                print("[M]essage | [S]end files | [Q]uit")
 
-
-
-
-
-
-    ### Menu
-
-    def menu(self):
-        while self.CONNECTION:
-            print("Choose option:")
-            print("[M]essage | [S]end files | [Q]uit")
-            choice = input()
-            match choice.lower():
-                case 'm':
-                    return
-                case 's':
-                    return
-                case 'q':
-                    self.CONNECTION = False
-                    self.menu_on = False
-                    return
-
+                choice = None
+                while self.CONNECTION and not self.Halt.is_set():
+                    try:
+                        choice = await asyncio.wait_for(asyncio.to_thread(input), timeout=3)
+                        break
+                    except asyncio.TimeoutError:
+                        # print("dbg: input timeout")
+                        if self.Halt.is_set():
+                            break
+                        continue
+                print("dbg: outside the input loop")
+                if self.Halt.is_set():
+                    continue
+                if not isinstance(choice, str):
+                    break
+                match choice.lower():
+                    case 'm':
+                        print("sending message...")
+                        await self.send_message()
+                        break
+                    case 's':
+                        print("sending files...")
+                        await self.send_file()
+                        break
+                    case 'q':
+                        print("quiting...")
+                        self.CONNECTION = False
+                        break
 
     ### FILE functions
 
 
     def incoming_file(self, pkt):
+        # Halting comm because we are about to receive a file
+        # get the frag size
         self.frag_size = int.from_bytes(pkt.data, "big", signed=False)
+
+
         self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.current_seq))
+        pass
+
+    async def send_file(self):
         pass
 
