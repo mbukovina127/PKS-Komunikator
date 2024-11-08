@@ -20,7 +20,7 @@ class Packet:
     def __init__(self, data: bytes):
         self.flag = data[0]
         self.dseq = data[1:5]
-        self.data = data[7:-2]
+        self.data = data[5:-2]
         self.crc = data[-2:]
 
         self.sequence_number = int.from_bytes(self.dseq, 'big', signed=False)

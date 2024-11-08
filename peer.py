@@ -1,12 +1,13 @@
+import asyncio
+import queue
 import random
+import socket
 import threading
 import time
 from enum import Enum
-from sys import flags
 
 from packet import Packet, Flags
-import asyncio
-import socket
+
 
 class State(Enum):
     Exit = 0
@@ -36,7 +37,7 @@ class Peer:
 
     ### menu functionality
         self.Halt = asyncio.Event()
-
+        self.INPUT = queue.Queue()
     ### sequence numbers
         self.current_seq = 0
         self.current_fallback = 0
@@ -73,8 +74,11 @@ class Peer:
 ### Message function
 
     async def send_message(self):
-        inp = input("Write message [--quit]: ")
-        if not inp.strip() or inp.lower() == "--quit":
+        self.clear_queue()
+        print("Write message [--quit]: ", end='')
+        inp = self.INPUT.get()
+        if inp.lower() == "--quit":
+            print("INFO: Not sending any message")
             return True
         if self.CONNECTION:
             self.send_packet(Packet.build(Flags.MSG.value, self.expect_seq, inp.encode()))
@@ -229,12 +233,11 @@ class Peer:
             self.expect_seq = 0
             print("ERROR: Connection lost")
 
+    # TODO: redo with input handler and queue
     def init_transmit(self):
         while not self.CONNECTION:
             print("Press enter to try to connect")
             input()
-            # Don't send packet if connection is established
-            # TODO: possible fix with the sleep loop
             if self.CONNECTION:
                 return
             if not self.syn_send_received and not self.CONNECTION:
@@ -251,30 +254,25 @@ class Peer:
     def communicate(self):
         listening = threading.Thread(target=self.LISTENER, args=(1500,))
         keep_alive = threading.Thread(target=self.keep_alive)
+        input_handler = threading.Thread(target=self.handle_input)
         listening.start()
         keep_alive.start()
-        print("You can now send messages")
+        input_handler.start()
 
         asyncio.run(self.menu())
 
-
-        # TODO: how the fuck do I remake this into an observer
-        # TODO: I need a thread for menu because I need to cancel the input waiting if something comes up
-        # TODO: I need a way for a listner to comunicate with menu in case a file arrives
-        # when state is changed what should I update
-        # lets have a function update that updates the state machine after that it calls the update switch which checks what to do
-        # if halt happens it turns off menu thread
-        # if exit happens the same thing as before and terminates connection
-        # if menu state is there it should start the menu thread
-        # in menu thread it can call the send msg and send file state and exit state
-        # but I can't call the update inside the menu because it would need to terminate it's own thread
-        # but I can't terminate the menu with halt and exit flag with no worry
-        # and I could terminate the menu with send msg and send file by changing the variable and then exiting the function into the updater
-        # but how the fuck do I do that if I call the updater only when I switch states I should stay at that state until I switch it
-        #
-
         listening.join()
+        keep_alive.join(0)
+        input_handler.join(0)
 
+### input
+    def handle_input(self):
+        while True:
+            inp = input()
+            print(inp, end='')
+            if inp.strip() and not self.Halt.is_set():
+                print("... put into queue")
+                self.INPUT.put(inp)
 
 ### Menu
     async def menu(self):
@@ -288,31 +286,30 @@ class Peer:
                 choice = None
                 while self.CONNECTION and not self.Halt.is_set():
                     try:
-                        choice = await asyncio.wait_for(asyncio.to_thread(input), timeout=3)
+                        choice = self.INPUT.get_nowait()
                         break
-                    except asyncio.TimeoutError:
-                        # print("dbg: input timeout")
-                        if self.Halt.is_set():
-                            break
+                    except queue.Empty:
+                        time.sleep(1)
                         continue
                 print("dbg: outside the input loop")
                 if self.Halt.is_set():
                     continue
-                if not isinstance(choice, str):
-                    break
                 match choice.lower():
                     case 'm':
                         print("sending message...")
                         await self.send_message()
-                        break
+                        continue
                     case 's':
                         print("sending files...")
                         await self.send_file()
-                        break
+                        continue
                     case 'q':
                         print("quiting...")
                         self.CONNECTION = False
                         break
+                    case _:
+                        print("no such option...")
+                        continue
 
     ### FILE functions
 
@@ -321,11 +318,16 @@ class Peer:
         # Halting comm because we are about to receive a file
         # get the frag size
         self.frag_size = int.from_bytes(pkt.data, "big", signed=False)
-
-
         self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.current_seq))
         pass
 
     async def send_file(self):
+        self.clear_queue()
+        print("not now")
+
         pass
+
+    def clear_queue(self):
+        # i geuss a bit risky but we are getting input so it should be fine
+        while not self.INPUT.empty(): self.INPUT.get_nowait()
 
