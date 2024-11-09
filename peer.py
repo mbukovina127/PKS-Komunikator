@@ -96,16 +96,22 @@ class Peer:
         self.send_packet(Packet.build(Flags.ACK.value, sequence_number=ack_seq))
 
 ### Message function
-
+    # TODO: ask for fragment size / split message accordingly
     async def send_message(self):
         self.clear_queue()
+        #getting fragment size
+        print("Fragment size [1-1465] | [K]eep default: ", end='')
+        inp = self.INPUT.get()
+        if inp != "K":
+            self.frag_size = int(inp)
+        inp = ""
         print("Write message [--quit]: ", end='')
         inp = self.INPUT.get()
         if inp.lower() == "--quit":
             print("INFO: Not sending any message")
             return True
         if self.ConnInfo.CONNECTION:
-            self.SENDER.queue_packet(Packet.build(Flags.MSG.value, self.ConnInfo.dest_seq, inp.encode()))
+            self.split_message()
             print("INFO: Message sent")
             return True
         else:
@@ -115,6 +121,18 @@ class Peer:
     def recv_message(self, pkt):
         pass
 
+    def split_message(self, message: str):
+        seq = self.ConnInfo.dest_seq
+        # TODO: wonky as fuk
+        # TODO: FAAAAAAAAAAAAAAAAAAAAAAAAAAAAK I have to make a receiver for this because we can miss some packets
+        msg_chunks = [
+            (Packet.build(flags=Flags.MSG.value
+                           ,sequence_number=seq + i*(self.frag_size + 1)
+                           ,data=(message[i: i+ self.frag_size]).encode()) )
+            for i in range(0, len(message), self.frag_size)]
+
+        msg_chunks[-1].flag = Flags.MSG_F.value
+        self.SENDER.queue_packet(msg_chunks)
 
 ### Packet parser
 

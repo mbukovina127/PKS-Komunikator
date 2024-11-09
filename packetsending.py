@@ -2,6 +2,8 @@ import queue
 import threading
 import time
 
+from packet import Packet
+
 
 class ThreadingSet:
     def __init__(self):
@@ -45,7 +47,12 @@ class Sender:
         self.SENT = sent_packets
 
     def queue_packet(self, pkt):
-        self.PACKETS.put(pkt)
+        if isinstance(pkt, Packet):
+            self.PACKETS.put(pkt)
+        # its gonna be a list ok?
+        else:
+            # TODO: I could put the whole list there so I know when to start selective repeat while sending files or messages
+            [self.PACKETS.put(pkt[i]) for i in range(len(pkt))]
 
     def run(self):
         while True:

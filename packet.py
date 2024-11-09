@@ -13,6 +13,7 @@ class Flags(Enum):
     FRAG = 6
     FRAG_F = 7
     MSG = 11
+    MSG_F = 12
 
 crc16_fun = crcmod.mkCrcFun(0x11021, rev=False, initCrc=0xFFFF, xorOut=0x0000)
 
