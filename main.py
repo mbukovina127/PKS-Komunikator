@@ -1,6 +1,6 @@
 import threading
 
-from peer import Peer
+from peer import Peer, ConnInfo
 
 if __name__ == '__main__':
     listening_port = input("Listening port def[50601]: ")
@@ -23,13 +23,17 @@ if __name__ == '__main__':
     if (ip == ''):
         ip = "127.0.0.1"
 
-    app = Peer(listening_port, transmitting_port, ip)
+    cInfo = ConnInfo(ip, listening_port, transmitting_port)
+    app = Peer(cInfo)
 
     ### start of thread
+    input_handler = threading.Thread(target=app.handle_input)
     init_listen = threading.Thread(target=app.init_listen)
     init_connection = threading.Thread(target=app.init_transmit)
     init_listen.start()
+    input_handler.start()
     init_connection.start()
+
 
 
     init_listen.join()

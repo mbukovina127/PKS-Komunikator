@@ -1,16 +1,20 @@
-Marko Bukovina 
-
+**Marko Bukovina**
 PKS 2024 (tester: Filip Brutovský)
 
 ## Completion
 - [x] Connection
   - [x] TCP handshake
   - [x] Keep Alive
+  - [ ] Closing connection
 - [x] Menu
 
 ### 2. - 3. Prenos textu/súboru - fragmentácia
-- [ ] Menu funkcionalita
+- [x] Menu funkcionalita
+- Spravy
+- [x] Posielanie sprav
 - [ ] Rozdelenie sprav
+- [ ] AQR Selective repeat
+- Subory
 - [ ] Rozdelenie suborov
 - **AQR Selective repeat**
   - [ ] Sender side
@@ -26,4 +30,3 @@ PKS 2024 (tester: Filip Brutovský)
 
 ### 6. Finálna dokumentácia
 - [ ] Done 
-

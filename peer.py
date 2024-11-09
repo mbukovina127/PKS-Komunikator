@@ -7,6 +7,7 @@ import time
 from enum import Enum
 
 from packet import Packet, Flags
+from packetsending import ThreadingSet, Sender
 
 
 class State(Enum):
@@ -16,33 +17,49 @@ class State(Enum):
     SendMessage = 3
     SendFile = 4
 
-
-class Peer:
-    def __init__(self, port_lst, port_trs, ip):
-        ### connection variables
+class ConnInfo:
+    def __init__(self, ip, port_lst, port_trs):
         self.dest_ip = ip
         self.listen_port = port_lst
         self.dest_port = port_trs
+        self.CONNECTION = False
+    ### sequence numbers
+        # I need to send to dest and expect ack of dest + offset + 1
+        # when I receive ack
+
+        # current is all the non ack packets heading my way
+        # we send ack only from this number
+        # we don't receive ack packets here
+        # I reply with ack of current + 1
+        self.current_seq = 0
+        self.current_fallback = 0
+        # dest is all the non ack packets that I send
+        # we receive ack packets with this number
+        self.dest_seq = 0
+        self.dest_fallback = 0
+
+class Peer:
+    def __init__(self, conn_info):
+        ### connection variables
+        self.ConnInfo = conn_info
 
     ### socket setup
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.transmitting_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.listening_socket.bind(('0.0.0.0', self.listen_port))
+        self.listening_socket.bind(('0.0.0.0', self.ConnInfo.listen_port))
         self.listening_socket.settimeout(60)
 
-    ### async variables
-        self.CONNECTION = False
+    ### handshake vars
         self.syn_send_received = False
         self.fin_send = False
 
-    ### menu functionality
+    ### Threading functionality
+        self.send_lock = threading.Lock()
         self.Halt = asyncio.Event()
+
+    ### DATA
+        self.SENT = ThreadingSet()
         self.INPUT = queue.Queue()
-    ### sequence numbers
-        self.current_seq = 0
-        self.current_fallback = 0
-        self.expect_seq = 0
-        self.expect_fallback = 0
 
     ### Keep Alive
         self.KA_time = 15
@@ -50,11 +67,14 @@ class Peer:
 
     ### files
         self.frag_size = 7 + 1465
+    ### THREADS
+        self.SENDER = Sender(self.transmitting_socket, self.ConnInfo, self.SENT, self.send_lock)
 
 ### PACKET FUNCTIONS
 
     def send_packet(self, packet: Packet):
-        self.transmitting_socket.sendto(packet.to_bytes(), (self.dest_ip, self.dest_port))
+        with self.send_lock:
+            self.transmitting_socket.sendto(packet.to_bytes(), (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
 
     def recv_packet(self, buffer_s) -> Packet:
         data, addr = self.listening_socket.recvfrom(buffer_s)
@@ -62,14 +82,18 @@ class Peer:
         return pkt
 
     def update_expected(self, offset: int = 1):
-        self.expect_fallback = self.expect_seq
-        self.expect_seq += offset
-        return self.expect_seq
+        self.ConnInfo.dest_fallback = self.ConnInfo.dest_seq
+        self.ConnInfo.dest_seq += offset
+        return self.ConnInfo.dest_seq
 
     def update_current(self, offset: int = 1):
-        self.current_fallback = self.current_seq
-        self.current_seq += offset
-        return self.current_seq
+        self.ConnInfo.current_fallback = self.ConnInfo.current_seq
+        self.ConnInfo.current_seq += offset
+        return self.ConnInfo.current_seq
+
+    def send_ack(self, pkt: Packet):
+        ack_seq = pkt.sequence_number + pkt.seq_offset + 1
+        self.send_packet(Packet.build(Flags.ACK.value, sequence_number=ack_seq))
 
 ### Message function
 
@@ -80,39 +104,52 @@ class Peer:
         if inp.lower() == "--quit":
             print("INFO: Not sending any message")
             return True
-        if self.CONNECTION:
-            self.send_packet(Packet.build(Flags.MSG.value, self.expect_seq, inp.encode()))
+        if self.ConnInfo.CONNECTION:
+            self.SENDER.queue_packet(Packet.build(Flags.MSG.value, self.ConnInfo.dest_seq, inp.encode()))
             print("INFO: Message sent")
             return True
         else:
             print("ERROR: No connection")
             return False
 
+    def recv_message(self, pkt):
+        pass
+
+
 ### Packet parser
 
     def parse_packet(self, pkt: Packet):
-        # print("pkt received")
+        print("pkt received")
         match (pkt.flag):
             case Flags.KEEP_ALIVE.value:
                 # print("DBG: KEEP ALIVE rec")
                 self.pulse = 3
                 return
+            #ack has seq of dest_seq + 1
             case Flags.ACK.value:
+                self.verify_packet(pkt)
                 if (self.fin_send == True):
                     quit()
                 return
+            #str seq of current
             case Flags.STR.value:
+                self.verify_packet(pkt)
                 self.Halt.set()
                 self.incoming_file(pkt)
                 return
+            #Frag seq of current
             case Flags.FRAG.value:
                 return
+            #Frag seq of current
             case Flags.FRAG_F.value:
                 # DO SOMETHING
                 self.Halt.clear()
                 return
+            #Frag seq of current
             case Flags.MSG.value:
+                self.recv_message(pkt)
                 print(pkt.data.decode("utf-8"))
+                self.send_ack(pkt)
                 return
             case Flags.FIN.value:
                 self.FIN_received()
@@ -120,11 +157,19 @@ class Peer:
             case _:
                 return
 
+    # TODO: test needs a rework
+    def verify_packet(self, pkt: Packet):
+        # for incoming packets
+        if pkt.sequence_number == self.ConnInfo.current_seq:
+            return True
+        # for acks of sent packets
+        return self.SENT.contains(pkt.sequence_number)
+
 ### THREAD FUNCTIONS
 
     def LISTENER(self, buffer_s):
         self.listening_socket.settimeout(60)
-        while self.CONNECTION:
+        while self.ConnInfo.CONNECTION:
             try:
                 rec_pkt = self.recv_packet(buffer_s)
                 self.parse_packet(rec_pkt)
@@ -138,7 +183,7 @@ class Peer:
 
     def init_termination(self):
         print("INFO: Terminating connection")
-        self.send_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.current_seq))
+        self.send_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.ConnInfo.current_seq))
         self.fin_send = True
 
     def FIN_received(self):
@@ -149,7 +194,7 @@ class Peer:
 
     def quit(self):
         print("INFO: Closing connection...")
-        self.CONNECTION = False
+        self.ConnInfo.CONNECTION = False
         self.listening_socket.close()
         self.transmitting_socket.close()
         print("INFO: Offline")
@@ -157,10 +202,10 @@ class Peer:
 ### KEEP ALIVE FUNCTION
 
     def keep_alive(self):
-        while self.CONNECTION:
+        while self.ConnInfo.CONNECTION:
             if self.pulse == 0:
                 print("ERROR: Connection lost... heart beat not received")
-                self.CONNECTION = False
+                self.ConnInfo.CONNECTION = False
                 return
             self.pulse -= 1
             self.heart_beat()
@@ -169,7 +214,7 @@ class Peer:
 
     def heart_beat(self):
         ka_pkt = Packet.build(flags=Flags.KEEP_ALIVE.value)
-        self.transmitting_socket.sendto(ka_pkt.to_bytes(), (self.dest_ip, self.dest_port))
+        self.transmitting_socket.sendto(ka_pkt.to_bytes(), (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
 
 ### HANDSHAKE FUNCTIONS
     # TODO: could move the 10s timeout into another thread
@@ -187,65 +232,64 @@ class Peer:
                 continue
             #we received syn packet without sending one
             if (rec_pkt.flag == Flags.SYN.value and not self.syn_send_received):
-                self.expect_seq = rec_pkt.sequence_number
+                self.ConnInfo.dest_seq = rec_pkt.sequence_number
                 print("DBG: syn received first seq ==", end="")
-                print(self.expect_seq)
-                self.current_seq = random.randint(1,900)
-                if self.current_seq == self.expect_seq:
-                    self.current_seq += 100
-                self.send_packet(Packet.build(flags=Flags.SYN.value, sequence_number=self.current_seq))
+                print(self.ConnInfo.dest_seq)
+                self.ConnInfo.current_seq = random.randint(1,900)
+                if self.ConnInfo.current_seq == self.ConnInfo.dest_seq:
+                    self.ConnInfo.current_seq += 100
+                self.send_packet(Packet.build(flags=Flags.SYN.value, sequence_number=self.ConnInfo.current_seq))
                 print("DBG: new syn sent")
-                print(self.current_seq)
+                print(self.ConnInfo.current_seq)
                 self.syn_send_received = True
                 time.sleep(0.5)
                 self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.update_expected()))
                 print("DBG: ack sent")
-                print(self.expect_seq)
+                print(self.ConnInfo.dest_seq)
                 continue
             #we receive ack after we received syn packet
             if rec_pkt.flag == Flags.ACK.value and self.syn_send_received:
                 print("DBG: ack received after syn received first")
-                if rec_pkt.sequence_number == (self.current_seq + 1):
-                    self.CONNECTION = True
+                if rec_pkt.sequence_number == (self.ConnInfo.current_seq + 1):
+                    self.ConnInfo.CONNECTION = True
                     self.update_current()
                     return
 
                 print ("DBG: seq doesn't match ", end="")
-                print(rec_pkt.sequence_number, self.current_seq + 1)
+                print(rec_pkt.sequence_number, self.ConnInfo.current_seq + 1)
             #we send syn packet first
             if rec_pkt.flag == Flags.SYN.value and self.syn_send_received:
                 print("DBG: syn received after syn sent")
-                if self.expect_seq == 0: # syn packet arrives after we send ours
+                if self.ConnInfo.dest_seq == 0: # syn packet arrives after we send ours
                     print("DBG: expected seq is empty")
-                    self.expect_seq = rec_pkt.sequence_number # we copy its sq number
+                    self.ConnInfo.dest_seq = rec_pkt.sequence_number # we copy its sq number
                     ack_pkt, addr = self.listening_socket.recvfrom(1500)
                     ack_pkt = Packet(ack_pkt)
                     print("DBG: ack received after syn sent")
                     if ack_pkt.flag == Flags.ACK.value: # we wait for an ack packet for our syn packet
-                        if ack_pkt.sequence_number == self.current_seq +1: # it has to have seq +1 of the one we sent
+                        if ack_pkt.sequence_number == self.ConnInfo.current_seq +1: # it has to have seq +1 of the one we sent
                             self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.update_expected())) # we send ack for the one we received
-                            self.CONNECTION = True
+                            self.ConnInfo.CONNECTION = True
                             self.update_current()
                             return
                         print("DBG: seq doesn't match")
-                        print(ack_pkt.sequence_number, self.current_seq +1)
-            self.current_seq = 0
-            self.expect_seq = 0
+                        print(ack_pkt.sequence_number, self.ConnInfo.current_seq +1)
+            self.ConnInfo.current_seq = 0
+            self.ConnInfo.dest_seq = 0
             print("ERROR: Connection lost")
 
-    # TODO: redo with input handler and queue
     def init_transmit(self):
-        while not self.CONNECTION:
-            print("Press enter to try to connect")
-            input()
-            if self.CONNECTION:
+        while not self.ConnInfo.CONNECTION:
+            print("[C]onnect?")
+            self.INPUT.get()
+            if self.ConnInfo.CONNECTION:
                 return
-            if not self.syn_send_received and not self.CONNECTION:
-                self.current_seq = random.randint(1, 1000)
-                self.send_packet(Packet.build(flags=Flags.SYN.value, sequence_number=self.current_seq))
+            if not self.syn_send_received and not self.ConnInfo.CONNECTION:
+                self.ConnInfo.current_seq = random.randint(1, 1000)
+                self.send_packet(Packet.build(flags=Flags.SYN.value, sequence_number=self.ConnInfo.current_seq))
                 self.syn_send_received = True
                 print("INFO: Establishing connection...")
-            while self.syn_send_received and not self.CONNECTION:
+            while self.syn_send_received and not self.ConnInfo.CONNECTION:
                 time.sleep(1)
 
 
@@ -254,29 +298,35 @@ class Peer:
     def communicate(self):
         listening = threading.Thread(target=self.LISTENER, args=(1500,))
         keep_alive = threading.Thread(target=self.keep_alive)
-        input_handler = threading.Thread(target=self.handle_input)
+        sending = threading.Thread(target=self.SENDER.run)
         listening.start()
-        keep_alive.start()
-        input_handler.start()
+        sending.start()
+        # keep_alive.start()
 
         asyncio.run(self.menu())
 
         listening.join()
         keep_alive.join(0)
-        input_handler.join(0)
+        sending.join(0)
 
 ### input
     def handle_input(self):
         while True:
             inp = input()
-            print(inp, end='')
+            # print(inp, end='')
+            if self.Halt.is_set():
+                print("INFO: Console is Halted because of incoming transmission don't write anything")
             if inp.strip() and not self.Halt.is_set():
-                print("... put into queue")
+                # print("... put into queue")
                 self.INPUT.put(inp)
+
+    def clear_queue(self):
+        # i geuss a bit risky but we are getting input so it should be fine
+        while not self.INPUT.empty(): self.INPUT.get_nowait()
 
 ### Menu
     async def menu(self):
-        while self.CONNECTION:
+        while self.ConnInfo.CONNECTION:
             if self.Halt.is_set():
                 await self.Halt.wait()
             else:
@@ -284,7 +334,8 @@ class Peer:
                 print("[M]essage | [S]end files | [Q]uit")
 
                 choice = None
-                while self.CONNECTION and not self.Halt.is_set():
+                # TODO: if I keep the HALT in input handler i should be able to safely remove this one here and also add a classic get() with no exception throwing
+                while self.ConnInfo.CONNECTION and not self.Halt.is_set():
                     try:
                         choice = self.INPUT.get_nowait()
                         break
@@ -305,7 +356,7 @@ class Peer:
                         continue
                     case 'q':
                         print("quiting...")
-                        self.CONNECTION = False
+                        self.ConnInfo.CONNECTION = False
                         break
                     case _:
                         print("no such option...")
@@ -318,7 +369,7 @@ class Peer:
         # Halting comm because we are about to receive a file
         # get the frag size
         self.frag_size = int.from_bytes(pkt.data, "big", signed=False)
-        self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.current_seq))
+        self.SENDER.queue_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.ConnInfo.current_seq))
         pass
 
     async def send_file(self):
@@ -326,8 +377,3 @@ class Peer:
         print("not now")
 
         pass
-
-    def clear_queue(self):
-        # i geuss a bit risky but we are getting input so it should be fine
-        while not self.INPUT.empty(): self.INPUT.get_nowait()
-
