@@ -35,6 +35,15 @@ class Packet:
         pkt = Packet(raw_data + crc)
         return pkt
 
+    # TODO: compare Chekcsum
+    @staticmethod
+    def checkChecksum(pkt: Packet) -> bool:
+        mine = crc16_fun(pkt.flag + pkt.dseq + pkt.data)
+        pkts = int.from_bytes(pkt.crc, 'big', signed=False)
+        if mine == pkts:
+            return True
+        return False
+
     def getChecksum(self):
         return crc16_fun([self.flag, *self.dseq, *self.data])
 

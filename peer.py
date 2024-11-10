@@ -7,7 +7,7 @@ import time
 from enum import Enum
 
 from packet import Packet, Flags
-from packetsending import ThreadingSet, Sender
+from packetsending import ThreadingSet, Sender, SlidingWindow
 
 
 class State(Enum):
@@ -24,17 +24,12 @@ class ConnInfo:
         self.dest_port = port_trs
         self.CONNECTION = False
     ### sequence numbers
-        # I need to send to dest and expect ack of dest + offset + 1
-        # when I receive ack
+        # I need to send to dest and expect ack of dest + offset + 1 when I receive ack
 
-        # current is all the non ack packets heading my way
-        # we send ack only from this number
-        # we don't receive ack packets here
-        # I reply with ack of current + 1
+        # current is all the non ack packets heading my way we send ack only from this number we don't receive ack packets here I reply with ack of current + 1
         self.current_seq = 0
         self.current_fallback = 0
-        # dest is all the non ack packets that I send
-        # we receive ack packets with this number
+        # dest is all the non ack packets that I send we receive ack packets with this number
         self.dest_seq = 0
         self.dest_fallback = 0
 
@@ -60,9 +55,10 @@ class Peer:
     ### DATA
         self.SENT = ThreadingSet()
         self.INPUT = queue.Queue()
+        self.WINDOW = SlidingWindow()
 
     ### Keep Alive
-        self.KA_time = 15
+        self.KA_time = 5
         self.pulse = 3
 
     ### files
@@ -79,7 +75,10 @@ class Peer:
     def recv_packet(self, buffer_s) -> Packet:
         data, addr = self.listening_socket.recvfrom(buffer_s)
         pkt = Packet(data)
-        return pkt
+        # TODO: kinda shit
+        if Packet.checkChecksum(pkt):
+            return pkt
+        return None
 
     def update_expected(self, offset: int = 1):
         self.ConnInfo.dest_fallback = self.ConnInfo.dest_seq
@@ -135,6 +134,9 @@ class Peer:
         self.SENDER.queue_packet(msg_chunks)
 
 ### Packet parser
+    #handeling acks for our sent packet. Removing them from our window should suffice
+    def ack_received(self, pkt):
+        self.WINDOW.remove(pkt.sequence_number)
 
     def parse_packet(self, pkt: Packet):
         print("pkt received")
@@ -146,6 +148,7 @@ class Peer:
             #ack has seq of dest_seq + 1
             case Flags.ACK.value:
                 self.verify_packet(pkt)
+                self.ack_received(pkt)
                 if (self.fin_send == True):
                     quit()
                 return
