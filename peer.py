@@ -22,7 +22,11 @@ class ConnInfo:
         self.dest_ip = ip
         self.listen_port = port_lst
         self.dest_port = port_trs
+    ### keep_alive
+        self.pulse = 3
+    ### states
         self.CONNECTION = False
+        self.fin_send = False
     ### sequence numbers
         # I need to send to dest and expect ack of dest + offset + 1 when I receive ack
 
@@ -32,6 +36,7 @@ class ConnInfo:
         # dest is all the non ack packets that I send we receive ack packets with this number
         self.dest_seq = 0
         self.dest_fallback = 0
+
 
 class Peer:
     def __init__(self, conn_info):
@@ -44,12 +49,13 @@ class Peer:
         self.listening_socket.bind(('0.0.0.0', self.ConnInfo.listen_port))
         self.listening_socket.settimeout(60)
 
-    ### handshake vars
+    ### handshake variables
         self.syn_send_received = False
-        self.fin_send = False
 
     ### Threading functionality
         self.send_lock = threading.Lock()
+        self.recv_lock = threading.Lock()
+        self.ka_lock = threading.Lock()
         self.Halt = asyncio.Event()
 
     ### DATA
@@ -57,14 +63,19 @@ class Peer:
         self.INPUT = queue.Queue()
         self.WINDOW = SlidingWindow()
 
+    ### MSG
+        self.message = ''
+        # dictionary of seq n of msg packet
+        self.message_buffer = {}
     ### Keep Alive
         self.KA_time = 5
-        self.pulse = 3
 
     ### files
         self.frag_size = 7 + 1465
     ### THREADS
-        self.SENDER = Sender(self.transmitting_socket, self.ConnInfo, self.SENT, self.send_lock)
+        self.SENDER = Sender(socket=self.transmitting_socket, conn_info=self.ConnInfo, lock=self.send_lock, window=self.WINDOW)
+        # self.RECEIVER= Receiver(socket=self.listening_socket, conn_info=self.ConnInfo, s_lock=self.send_lock, ka_lock=self.ka_lock, window=self.WINDOW)
+
 
 ### PACKET FUNCTIONS
 
@@ -72,13 +83,10 @@ class Peer:
         with self.send_lock:
             self.transmitting_socket.sendto(packet.to_bytes(), (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
 
-    def recv_packet(self, buffer_s) -> Packet:
-        data, addr = self.listening_socket.recvfrom(buffer_s)
-        pkt = Packet(data)
-        # TODO: kinda shit
-        if Packet.checkChecksum(pkt):
-            return pkt
-        return None
+    def recv_packet(self, buffer_s):
+        with self.recv_lock:
+            data, addr = self.listening_socket.recvfrom(buffer_s)
+        return Packet(data)
 
     def update_expected(self, offset: int = 1):
         self.ConnInfo.dest_fallback = self.ConnInfo.dest_seq
@@ -92,9 +100,12 @@ class Peer:
 
     def send_ack(self, pkt: Packet):
         ack_seq = pkt.sequence_number + pkt.seq_offset + 1
+        print("DBG: about to send ack")
         self.send_packet(Packet.build(Flags.ACK.value, sequence_number=ack_seq))
+        print("DBG: sent ack" + str(ack_seq))
 
 ### Message function
+
     async def send_message(self):
         self.clear_queue()
         #getting fragment size
@@ -109,15 +120,13 @@ class Peer:
             print("INFO: Not sending any message")
             return True
         if self.ConnInfo.CONNECTION:
-            self.split_message()
+            self.split_message(inp)
             print("INFO: Message sent")
             return True
         else:
             print("ERROR: No connection")
             return False
 
-    def recv_message(self, pkt):
-        pass
 
     def split_message(self, message: str):
         seq = self.ConnInfo.dest_seq
@@ -125,35 +134,73 @@ class Peer:
         # TODO: FAAAAAAAAAAAAAAAAAAAAAAAAAAAAK I have to make a receiver for this because we can miss some packets
         msg_chunks = [
             (Packet.build(flags=Flags.MSG.value
-                           ,sequence_number=seq + i*(self.frag_size + 1)
+                           ,sequence_number=(seq + i)
                            ,data=(message[i: i+ self.frag_size]).encode()) )
             for i in range(0, len(message), self.frag_size)]
 
-        msg_chunks[-1].flag = Flags.MSG_F.value
+        msg_chunks[-1].changeFlag(Flags.MSG_F.value)
         self.SENDER.queue_packet(msg_chunks)
 
-### Packet parser
+    def print_MSG(self):
+        print("Message received: ", end='')
+        print(self.message)
+        self.message = ""
+
+    # TODO: wonky as two fucks
+    # but I guess it will do
+    def process_MSG(self, pkt: Packet):
+        print("DBG: processing MSG packet... message thus far: " + self.message)
+        if pkt.flag == Flags.MSG.value:
+            if pkt.sequence_number == self.ConnInfo.current_seq:
+                print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                self.message += pkt.data.decode()
+                self.update_current(pkt.seq_offset)
+                # check out of order packets
+                while self.ConnInfo.current_seq in self.message_buffer:
+                    pkt = self.message_buffer.pop(self.ConnInfo.current_seq)
+                    self.message += pkt.data.decode()
+                    self.update_current(pkt.seq_offset)
+                    if pkt.flag == Flags.MSG_F.value:
+                        self.print_MSG()
+
+            elif pkt.sequence_number > self.ConnInfo.current_seq:
+                print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                self.message_buffer[pkt.sequence_number] = pkt
+
+        else: # only other one is MSG_F
+            if pkt.sequence_number == self.ConnInfo.current_seq:
+                print("DBG: Fin is in order")
+                self.message += pkt.data.decode()
+                self.update_current(pkt.seq_offset)
+                self.print_MSG()
+            else:
+                print("DBG: Fin is out of order")
+                self.message_buffer[pkt.sequence_number] = pkt
+
+        self.send_ack(pkt)
+
+    ### Packet parser
     #handeling acks for our sent packet. Removing them from our window should suffice
+
     def ack_received(self, pkt):
-        self.WINDOW.remove(pkt.sequence_number)
+        if self.WINDOW.remove(pkt.sequence_number):
+            print("DBG: ack removed successfully" + str(pkt.sequence_number))
 
     def parse_packet(self, pkt: Packet):
-        print("pkt received")
+        if not self.verify_packet(pkt):
+            return False
         match (pkt.flag):
             case Flags.KEEP_ALIVE.value:
                 # print("DBG: KEEP ALIVE rec")
-                self.pulse = 3
+                with self.ka_lock:
+                    self.ConnInfo.pulse = 3
                 return
             #ack has seq of dest_seq + 1
             case Flags.ACK.value:
-                self.verify_packet(pkt)
                 self.ack_received(pkt)
-                if (self.fin_send == True):
-                    quit()
                 return
             #str seq of current
             case Flags.STR.value:
-                self.verify_packet(pkt)
                 self.Halt.set()
                 self.incoming_file(pkt)
                 return
@@ -167,10 +214,10 @@ class Peer:
                 return
             #Frag seq of current
             case Flags.MSG.value:
-                self.recv_message(pkt)
-                print(pkt.data.decode("utf-8"))
-                self.send_ack(pkt)
+                self.process_MSG(pkt)
                 return
+            case Flags.MSG_F.value:
+                self.process_MSG(pkt)
             case Flags.FIN.value:
                 self.FIN_received()
                 return
@@ -179,12 +226,7 @@ class Peer:
 
     # TODO: test needs a rework
     def verify_packet(self, pkt: Packet):
-        # for incoming packets
-        if pkt.sequence_number == self.ConnInfo.current_seq:
-            return True
-        # for acks of sent packets
-        return self.SENT.contains(pkt.sequence_number)
-
+        return Packet.checkChecksum(pkt)
 ### THREAD FUNCTIONS
 
     def LISTENER(self, buffer_s):
@@ -223,11 +265,12 @@ class Peer:
 
     def keep_alive(self):
         while self.ConnInfo.CONNECTION:
-            if self.pulse == 0:
+            if self.ConnInfo.pulse == 0:
                 print("ERROR: Connection lost... heart beat not received")
                 self.ConnInfo.CONNECTION = False
                 return
-            self.pulse -= 1
+            with self.ka_lock:
+                self.ConnInfo.pulse -= 1
             self.heart_beat()
             # print("DBG: heart beat sent")
             time.sleep(self.KA_time)

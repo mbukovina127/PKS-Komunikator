@@ -12,8 +12,8 @@ PKS 2024 (tester: Filip Brutovský)
 - [x] Menu funkcionalita
 - Spravy
 - [x] Posielanie sprav
-- [ ] Rozdelenie sprav
-- [ ] ARQ Selective repeat
+- [x] Rozdelenie sprav
+- [x] ARQ Selective repeat
 - Subory
 - [ ] Rozdelenie suborov
 - **ARQ Selective repeat**

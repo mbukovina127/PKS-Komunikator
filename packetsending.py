@@ -1,7 +1,6 @@
 import queue
 import threading
 import time
-from tkinter.tix import WINDOW
 
 from packet import Packet
 
@@ -57,10 +56,11 @@ class SlidingWindow:
         with self._lock:
             return self._dict.get(seq)
 
-    def remove(self, seq: int):
+    def remove(self, seq: int) -> bool:
         with self._lock:
             self._dict.pop(seq)
             self._size -= 1
+            return True
 
     def contains(self, sequence_number):
         with self._lock:
@@ -87,22 +87,24 @@ class Sender:
             [self.PACKETS.put(pkt[i]) for i in range(len(pkt))]
 
 ### Retransmitting
-    def send_from_window(self, sequence_number):
+    def send_from_window(self, ack_sequence_number):
         with self.send_lock:
-            self.socket.sendto(self.WINDOW.get(sequence_number).to_bytes(), (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
+            self.socket.sendto(self.WINDOW.get(ack_sequence_number).to_bytes(), (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
+            print("DBG: sent pkt from window " + str(ack_sequence_number))
 
-    def retransmit(self, sequence_number):
+    def retransmit(self, ack_sequence_number):
         while True:
-            time.sleep(self.window_timer)
             #if its still in the window Im going to assume it was not acknowledged
-            if self.WINDOW.contains(sequence_number) and isinstance(self.WINDOW.get(sequence_number), Packet):
-                self.send_from_window(sequence_number)
+            if self.WINDOW.contains(ack_sequence_number) and isinstance(self.WINDOW.get(ack_sequence_number), Packet):
+                self.send_from_window(ack_sequence_number)
             else:
                 return
+            time.sleep(self.window_timer)
 
 ### main
 
     def run(self):
+        print("DBG: sender running")
         while True:
             while (not self.ConnInfo.CONNECTION
                    or self.WINDOW.__len__() == self.WIN_limit):
@@ -114,5 +116,6 @@ class Sender:
                 # line | offset for data size | 1 for expected acknowledge
                 ack_seq = s_pkt.sequence_number + s_pkt.seq_offset + 1
                 self.WINDOW.add(ack_seq, s_pkt)
-                threading.Thread(target=self.retransmit, args=(ack_seq, s_pkt,)).start()
+                print("DBG: packet in window")
+                threading.Thread(target=self.retransmit, args=(ack_seq,)).start()
 
