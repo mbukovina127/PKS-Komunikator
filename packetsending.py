@@ -42,11 +42,16 @@ class ThreadingSet:
 class SlidingWindow:
     def __init__(self):
         self._dict = {}
+        self._size = 0
         self._lock = threading.Lock()
+
+    def __len__(self):
+        return self._size
 
     def add(self, seq: int, pkt: Packet):
         with self._lock:
             self._dict[seq] = pkt
+            self._size += 1
 
     def get(self, seq: int) -> Packet:
         with self._lock:
@@ -55,26 +60,22 @@ class SlidingWindow:
     def remove(self, seq: int):
         with self._lock:
             self._dict.pop(seq)
+            self._size -= 1
 
     def contains(self, sequence_number):
         with self._lock:
             return sequence_number in self._dict
 
-
 class Sender:
-    def __init__(self, socket, conn_info, sent_packets, lock, window: SlidingWindow, win_limit=4):
+    def __init__(self, socket, conn_info, lock, window: SlidingWindow, win_limit=4):
         self.socket = socket
         self.ConnInfo = conn_info
         self.send_lock = lock
         self.PACKETS = queue.Queue()
         self.WINDOW = window
-        self.WIN_size = 0
         self.WIN_limit = win_limit
         #timer
         self.window_timer = 1
-    # I have a window of four packets that I sent
-    # I when I receive a packet that was sent first I remove it from the base of window
-    # if I receive a packet after the first one I sent all the previous packets again
 
 
 
@@ -84,10 +85,6 @@ class Sender:
         # its gonna be a list ok?
         else:
             [self.PACKETS.put(pkt[i]) for i in range(len(pkt))]
-
-    # I need an observer function that
-    # I need a WINDOW fill function that fills the window until it can't anymore the can't is going to be a timeout exception with the get_nowait()
-    # when It's done
 
 ### Retransmitting
     def send_from_window(self, sequence_number):
@@ -103,17 +100,18 @@ class Sender:
             else:
                 return
 
+### main
 
     def run(self):
         while True:
             while (not self.ConnInfo.CONNECTION
-                   or self.WIN_size == self.WIN_limit):
+                   or self.WINDOW.__len__() == self.WIN_limit):
                 time.sleep(1)
 
-            while self.WIN_size < self.WIN_limit:
+            while self.WINDOW.__len__() < self.WIN_limit:
                 s_pkt = self.PACKETS.get() # blocking should matter much here
+                # TODO: I have no idea what I should do when I lose connection
                 # line | offset for data size | 1 for expected acknowledge
-                #TODO: I have no idea what I should do when I lose connection
                 ack_seq = s_pkt.sequence_number + s_pkt.seq_offset + 1
                 self.WINDOW.add(ack_seq, s_pkt)
                 threading.Thread(target=self.retransmit, args=(ack_seq, s_pkt,)).start()

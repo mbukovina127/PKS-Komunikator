@@ -95,7 +95,6 @@ class Peer:
         self.send_packet(Packet.build(Flags.ACK.value, sequence_number=ack_seq))
 
 ### Message function
-    # TODO: ask for fragment size / split message accordingly
     async def send_message(self):
         self.clear_queue()
         #getting fragment size

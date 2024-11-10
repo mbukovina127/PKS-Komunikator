@@ -13,10 +13,10 @@ PKS 2024 (tester: Filip Brutovský)
 - Spravy
 - [x] Posielanie sprav
 - [ ] Rozdelenie sprav
-- [ ] AQR Selective repeat
+- [ ] ARQ Selective repeat
 - Subory
 - [ ] Rozdelenie suborov
-- **AQR Selective repeat**
+- **ARQ Selective repeat**
   - [ ] Sender side
   - [ ] Receiver side
 - [ ] Damaged data
