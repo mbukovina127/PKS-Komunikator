@@ -67,7 +67,7 @@ class SlidingWindow:
             return sequence_number in self._dict
 
 class Sender:
-    def __init__(self, socket, conn_info, lock, window: SlidingWindow, win_limit=4):
+    def __init__(self, socket, conn_info, lock, window: SlidingWindow, win_limit=10):
         self.socket = socket
         self.ConnInfo = conn_info
         self.send_lock = lock
@@ -75,7 +75,7 @@ class Sender:
         self.WINDOW = window
         self.WIN_limit = win_limit
         #timer
-        self.window_timer = 1
+        self.window_timer = 1.5
 
 
 
@@ -90,7 +90,7 @@ class Sender:
     def send_from_window(self, ack_sequence_number):
         with self.send_lock:
             self.socket.sendto(self.WINDOW.get(ack_sequence_number).to_bytes(), (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
-            print("DBG: sent pkt from window " + str(ack_sequence_number))
+            # print("DBG: sent pkt from window " + str(ack_sequence_number))
 
     def retransmit(self, ack_sequence_number):
         while True:
@@ -107,8 +107,8 @@ class Sender:
         print("DBG: sender running")
         while True:
             while (not self.ConnInfo.CONNECTION
-                   or self.WINDOW.__len__() == self.WIN_limit):
-                time.sleep(1)
+                   or self.WINDOW.__len__() >= self.WIN_limit):
+                time.sleep(0.1)
 
             while self.WINDOW.__len__() < self.WIN_limit:
                 s_pkt = self.PACKETS.get() # blocking should matter much here
