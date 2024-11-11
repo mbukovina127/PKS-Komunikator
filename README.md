@@ -15,10 +15,10 @@ PKS 2024 (tester: Filip Brutovský)
 - [x] Rozdelenie sprav
 - [x] ARQ Selective repeat
 - Subory
-- [ ] Rozdelenie suborov
+- [x] Rozdelenie suborov
 - **ARQ Selective repeat**
-  - [ ] Sender side
-  - [ ] Receiver side
+  - [x] Sender side
+  - [x] Receiver side
 - [ ] Damaged data
 
 ### 4. Udržanie spojenia (Keep-Alive)
