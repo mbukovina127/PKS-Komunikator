@@ -1,4 +1,5 @@
 import asyncio
+import math
 import os
 import queue
 import random
@@ -44,7 +45,7 @@ class Peer:
     def __init__(self, conn_info):
     ### connection variables
         self.ConnInfo = conn_info
-        self.frag_size = HEADER_SIZE + 1465
+        self.frag_size = 1465
 
     ### socket setup
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -74,8 +75,10 @@ class Peer:
         self.KA_time = 5
 
     ### files
+        self.file_name = ""
         self.file_data: bytes = bytes(0)
         self.file_buffer = {}
+
     ### THREADS
         self.SENDER = Sender(socket=self.transmitting_socket, conn_info=self.ConnInfo, lock=self.send_lock, window=self.WINDOW)
         # self.RECEIVER= Receiver(socket=self.listening_socket, conn_info=self.ConnInfo, s_lock=self.send_lock, ka_lock=self.ka_lock, window=self.WINDOW)
@@ -114,7 +117,7 @@ class Peer:
         # TODO: check if its fragmenting further in tcp
         if frag_size < 1 or frag_size > 1465:
             raise ValueError()
-        self.frag_size = frag_size + HEADER_SIZE
+        self.frag_size = frag_size
 
 
 ### Message function
@@ -122,8 +125,6 @@ class Peer:
     async def send_message(self):
         self.clear_queue()
         #getting fragment size
-        self.prompt_frag_change()
-
         print("Write message [--quit]: ", end='')
         inp = self.INPUT.get()
         if inp.lower() == "--quit":
@@ -140,13 +141,15 @@ class Peer:
     def split_message(self, message: str):
         seq = self.ConnInfo.dest_seq
         # TODO: wonky as fuk
-        # TODO: FAAAAAAAAAAAAAAAAAAAAAAAAAAAAK I have to make a receiver for this because we can miss some packets
+        # TODO: doenst work I need a better for loop
         msg_chunks = [
             (Packet.build(flags=Flags.MSG.value
-                           ,sequence_number=(seq + i)
-                           ,data=(message[i: i+ self.frag_size]).encode()) )
-            for i in range(0, len(message), self.frag_size)]
-
+                           ,sequence_number=(seq + i*(self.frag_size+1))
+                           ,data=(message[i*self.frag_size: i*self.frag_size+ self.frag_size]).encode()) )
+            for i in range(0, math.ceil(len(message) / self.frag_size))]
+        for frg in msg_chunks:
+            print(frg.sequence_number)
+        print("end")
         msg_chunks[-1].changeFlag(Flags.MSG_F.value)
         self.SENDER.queue_packet(msg_chunks)
 
@@ -158,32 +161,32 @@ class Peer:
     # TODO: wonky as two fucks
     # but I guess it will do
     def process_MSG(self, pkt: Packet):
-        # print("DBG: processing MSG packet... message thus far: " + self.message)
+        print("DBG: processing MSG packet... message thus far: " + self.message)
         if pkt.flag == Flags.MSG.value:
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message += pkt.data.decode()
-                self.update_current(pkt.seq_offset)
+                self.update_current(pkt.seq_offset + 1)
                 # check out of order packets
                 while self.ConnInfo.current_seq in self.message_buffer:
                     pkt = self.message_buffer.pop(self.ConnInfo.current_seq)
                     self.message += pkt.data.decode()
-                    self.update_current(pkt.seq_offset)
+                    self.update_current(pkt.seq_offset + 1)
                     if pkt.flag == Flags.MSG_F.value:
                         self.print_MSG()
 
             elif pkt.sequence_number > self.ConnInfo.current_seq:
-                # print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message_buffer[pkt.sequence_number] = pkt
 
         else: # only other one is MSG_F
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                # print("DBG: Fin is in order")
+                print("DBG: Fin is in order")
                 self.message += pkt.data.decode()
-                self.update_current(pkt.seq_offset)
+                self.update_current(pkt.seq_offset + 1)
                 self.print_MSG()
             else:
-                # print("DBG: Fin is out of order")
+                print("DBG: Fin is out of order... pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message_buffer[pkt.sequence_number] = pkt
 
         self.send_ack(pkt)
@@ -193,6 +196,12 @@ class Peer:
 
     def ack_received(self, pkt):
         if self.WINDOW.remove(pkt.sequence_number):
+            # TODO: this could use its own function
+            if pkt.sequence_number > self.ConnInfo.dest_seq:
+                print("DBG: Received ack...")
+                print(pkt.sequence_number)
+                self.ConnInfo.dest_seq = pkt.sequence_number
+                print(self.ConnInfo.dest_seq)
             return True
         return False
             # print("DBG: ack removed successfully" + str(pkt.sequence_number))
@@ -389,9 +398,6 @@ class Peer:
     def handle_input(self):
         while True:
             inp = input()
-            # print(inp, end='')
-            # if self.Halt.is_set():
-            #     print("INFO: Console is Halted because of incoming transmission don't write anything")
             if inp.strip():
                 # print("... put into queue")
                 self.INPUT.put(inp)
@@ -407,7 +413,7 @@ class Peer:
                 await self.Halt.wait()
             else:
                 print("Choose option:")
-                print("[M]essage | [S]end files | [Q]uit")
+                print("[M]essage | [S]end files | [C]hange fragment size | [Q]uit ")
 
                 choice = None
                 # TODO: if I keep the HALT in input handler i should be able to safely remove this one here and also add a classic get() with no exception throwing
@@ -424,25 +430,30 @@ class Peer:
                 print("dbg: outside the input loop")
                 if self.Halt.is_set():
                     continue
+
                 match choice.lower():
                     case 'm':
                         print("sending message...")
                         await self.send_message()
                         continue
                     case 's':
-                        print("sending files...")
+                        print("sending file...")
                         await self.send_file()
                         continue
+                    case 'c':
+                        self.prompt_frag_change()
                     case 'q':
                         print("quiting...")
                         self.ConnInfo.CONNECTION = False
                         break
+
                     case _:
                         print("no such option...")
                         continue
 
 ### FILE functions
 
+    #TODO: update the splitting
     async def send_file(self):
         self.clear_queue()
         self.prompt_frag_change()
@@ -461,6 +472,7 @@ class Peer:
 
         # TODO: I will do this without STR flag at first Ill see how it's going to go
         seq = self.ConnInfo.dest_seq #+ self.frag_size
+        print("DBG: splitting message first seq is " + str(seq))
         fragments = [( Packet.build(
             flags=Flags.FRAG.value,
             sequence_number=seq + i,
@@ -476,12 +488,12 @@ class Peer:
             if pkt.sequence_number == self.ConnInfo.current_seq:
                 # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.file_data += pkt.data
-                self.update_current(pkt.seq_offset)
+                self.update_current(pkt.seq_offset + 1)
                 # check out of order packets
                 while self.ConnInfo.current_seq in self.file_buffer:
                     pkt = self.file_buffer.pop(self.ConnInfo.current_seq)
                     self.file_data += pkt.data
-                    self.update_current(pkt.seq_offset)
+                    self.update_current(pkt.seq_offset + 1)
                     if pkt.flag == Flags.FRAG_F.value:
                         threading.Thread(target=self.save_file).start()
 
@@ -493,7 +505,7 @@ class Peer:
             if pkt.sequence_number == self.ConnInfo.current_seq:
                 # print("DBG: Fin is in order")
                 self.file_data += pkt.data
-                self.update_current(pkt.seq_offset)
+                self.update_current(pkt.seq_offset + 1)
                 threading.Thread(target=self.save_file).start()
             else:
                 # print("DBG: Fin is out of order")
@@ -505,7 +517,7 @@ class Peer:
         while True:
             print("Fragment size [1-1465] | [K]eep default: ", end='')
             inp = self.INPUT.get()
-            if inp != "K":
+            if inp != "K" or "k":
                 try:
                     self.change_frag_size(int(inp))
                     break
