@@ -116,6 +116,6 @@ class Sender:
                 # line | offset for data size | 1 for expected acknowledge
                 ack_seq = s_pkt.sequence_number + s_pkt.seq_offset + 1
                 self.WINDOW.add(ack_seq, s_pkt)
-                print("DBG: packet in window")
+                # print("DBG: packet in window")
                 threading.Thread(target=self.retransmit, args=(ack_seq,)).start()
 
