@@ -1,9 +1,22 @@
 import queue
+import random
 import threading
 import time
 
 from packet import Packet
 
+
+def simulate_packet_corruption(packet_data: bytes, corruption_rate: float = 0.1) -> bytes:
+    corrupted_data = bytearray(packet_data)  # Convert to mutable type for manipulation
+
+    if random.random() < corruption_rate:  # Decide if this byte will be corrupted
+        for i in range(len(corrupted_data)):
+            if random.random() < corruption_rate:  # Decide if this byte will be corrupted
+                # Randomly flip a bit in the byte
+                bit_to_flip = 1 << random.randint(0, 7)  # Select a random bit to flip
+                corrupted_data[i] ^= bit_to_flip  # Flip the bit using XOR
+
+    return bytes(corrupted_data)
 
 class ThreadingSet:
     def __init__(self):
@@ -57,10 +70,13 @@ class SlidingWindow:
             return self._dict.get(seq)
 
     def remove(self, seq: int) -> bool:
-        with self._lock:
-            self._dict.pop(seq)
-            self._size -= 1
-            return True
+        try:
+            with self._lock:
+                self._dict.pop(seq)
+                self._size -= 1
+                return True
+        except KeyError:
+            return False
 
     def contains(self, sequence_number):
         with self._lock:
@@ -75,7 +91,7 @@ class Sender:
         self.WINDOW = window
         self.WIN_limit = win_limit
         #timer
-        self.window_timer = 1.5
+        self.window_timer = 0.3
 
 
 
@@ -86,10 +102,14 @@ class Sender:
         else:
             [self.PACKETS.put(pkt[i]) for i in range(len(pkt))]
 
+
 ### Retransmitting
     def send_from_window(self, ack_sequence_number):
+        packet_to_send = self.WINDOW.get(ack_sequence_number).to_bytes()
+        pkt = simulate_packet_corruption(packet_to_send, 0.5)
+
         with self.send_lock:
-            self.socket.sendto(self.WINDOW.get(ack_sequence_number).to_bytes(), (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
+            self.socket.sendto(pkt, (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
             # print("DBG: sent pkt from window " + str(ack_sequence_number))
 
     def retransmit(self, ack_sequence_number):

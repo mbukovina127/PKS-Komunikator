@@ -6,20 +6,22 @@ import random
 import socket
 import threading
 import time
-from enum import Enum
+from enum import verify
 
 from packet import Packet, Flags
 from packetsending import ThreadingSet, Sender, SlidingWindow
 
 HEADER_SIZE = 7
 
+# TODO: FIN/ termination implemeted
+# TODO: STR packet will block the console
+# TODO: better menu
 
-class State(Enum):
-    Exit = 0
-    Halt = 1
-    InMenu = 2
-    SendMessage = 3
-    SendFile = 4
+# TODO: better sequence number updaters
+# TODO: Ability to receive two files in sequence
+# TODO: check frag size in case its too big
+# TODO: fix exceptions
+
 
 class ConnInfo:
     def __init__(self, ip, port_lst, port_trs):
@@ -45,7 +47,12 @@ class Peer:
     def __init__(self, conn_info):
     ### connection variables
         self.ConnInfo = conn_info
+
+    ### fragmentation
         self.frag_size = 1465
+        self.trans_time = 0
+        self.start_time = 0
+        self.end_time = 0
 
     ### socket setup
         self.listening_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -60,7 +67,7 @@ class Peer:
         self.send_lock = threading.Lock()
         self.recv_lock = threading.Lock()
         self.ka_lock = threading.Lock()
-        self.Halt = asyncio.Event()
+        self.menu_halt = asyncio.Event()
 
     ### DATA
         self.SENT = ThreadingSet()
@@ -114,7 +121,6 @@ class Peer:
         return self.ConnInfo.current_seq
 
     def change_frag_size(self, frag_size: int):
-        # TODO: check if its fragmenting further in tcp
         if frag_size < 1 or frag_size > 1465:
             raise ValueError()
         self.frag_size = frag_size
@@ -140,19 +146,28 @@ class Peer:
 
     def split_message(self, message: str):
         seq = self.ConnInfo.dest_seq
-        # TODO: wonky as fuk
-        # TODO: doenst work I need a better for loop
         msg_chunks = [
             (Packet.build(flags=Flags.MSG.value
                            ,sequence_number=(seq + i*(self.frag_size+1))
                            ,data=(message[i*self.frag_size: i*self.frag_size+ self.frag_size]).encode()) )
             for i in range(0, math.ceil(len(message) / self.frag_size))]
         msg_chunks[-1].changeFlag(Flags.MSG_F.value)
+
+        if len(msg_chunks) > 1:
+            print(f"INFO: Sending message: "
+                  f" size-{len(message)} |"
+                  f" number of fragments-{len(msg_chunks)} |"
+                  f" fragment size-{self.frag_size} |"
+                  f"{' last fragment-' + str(msg_chunks[-1].seq_offset) + ' |' if msg_chunks[-1].seq_offset < self.frag_size else ''}")
+
         self.SENDER.queue_packet(msg_chunks)
 
     def print_MSG(self):
-        print("Message received: ", end='')
-        print(self.message)
+        print("Message received")
+        if self.get_transmission_time():
+            print(f"DBG: {self.trans_time}")
+            print(f"INFO: Transmission time-{(self.trans_time//60):.0f}m:{(self.trans_time%60):.2f}s")
+        print(f"---{self.message}")
         self.message = ""
 
     # TODO: wonky as two fucks
@@ -160,6 +175,7 @@ class Peer:
     def process_MSG(self, pkt: Packet):
         # print("DBG: processing MSG packet... message thus far: " + self.message)
         if pkt.flag == Flags.MSG.value:
+            self.get_start_time()
             if pkt.sequence_number == self.ConnInfo.current_seq:
                 # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message += pkt.data.decode()
@@ -170,6 +186,7 @@ class Peer:
                     self.message += pkt.data.decode()
                     self.update_current(pkt.seq_offset + 1)
                     if pkt.flag == Flags.MSG_F.value:
+                        self.get_end_time()
                         self.print_MSG()
 
             elif pkt.sequence_number > self.ConnInfo.current_seq:
@@ -181,6 +198,7 @@ class Peer:
                 # print("DBG: Fin is in order")
                 self.message += pkt.data.decode()
                 self.update_current(pkt.seq_offset + 1)
+                self.get_end_time()
                 self.print_MSG()
             else:
                 # print("DBG: Fin is out of order... pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
@@ -200,9 +218,17 @@ class Peer:
         return False
             # print("DBG: ack removed successfully" + str(pkt.sequence_number))
 
-    def parse_packet(self, pkt: Packet):
-        if not self.verify_packet(pkt):
+    def verify_packet(self, pkt: Packet):
+        if Packet.checkChecksum(pkt):
+            print(f"INFO: Packet-{pkt.sequence_number} received -- success")
+            return True
+        else:
+            print(f"INFO: Packet-{pkt.sequence_number} received -- fail")
             return False
+
+    def parse_packet(self, pkt: Packet):
+        # if not self.verify_packet(pkt):
+        #     return False
         match (pkt.flag):
             case Flags.KEEP_ALIVE.value:
                 # print("DBG: KEEP ALIVE rec")
@@ -229,20 +255,14 @@ class Peer:
                 self.incoming_file(pkt)
                 return
             # Frag seq of current
-            case Flags.FRAG.value:
-                self.process_frag(pkt)
+            case Flags.FRAG.value | Flags.FRAG_F.value:
+                if self.verify_packet(pkt):
+                    self.process_frag(pkt)
                 return
             #Frag seq of current
-            case Flags.FRAG_F.value:
-                # DO SOMETHING
-                self.process_frag(pkt)
-                return
-            #Frag seq of current
-            case Flags.MSG.value:
-                self.process_MSG(pkt)
-                return
-            case Flags.MSG_F.value:
-                self.process_MSG(pkt)
+            case Flags.MSG.value | Flags.MSG_F.value:
+                if self.verify_packet(pkt):
+                    self.process_MSG(pkt)
                 return
             case Flags.FIN.value:
                 self.FIN_received()
@@ -250,9 +270,6 @@ class Peer:
             case _:
                 return
 
-    # TODO: test needs a rework
-    def verify_packet(self, pkt: Packet):
-        return Packet.checkChecksum(pkt)
 
 ### THREAD FUNCTIONS
 
@@ -277,6 +294,7 @@ class Peer:
     def FIN_received(self):
         self.send_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.ConnInfo.dest_seq))
         self.ConnInfo.fin_recv = True
+
     def quit(self):
         print("INFO: Closing connection...")
         self.ConnInfo.CONNECTION = False
@@ -396,47 +414,45 @@ class Peer:
             if inp.strip():
                 # print("... put into queue")
                 self.INPUT.put(inp)
-
     def clear_queue(self):
-        # i geuss a bit risky but we are getting input so it should be fine
+        # i geuss a bit risky but we are getting user input so it should be fine
         while not self.INPUT.empty(): self.INPUT.get_nowait()
 
 ### Menu
     async def menu(self):
         while self.ConnInfo.CONNECTION:
-            if self.Halt.is_set():
-                await self.Halt.wait()
+            if self.menu_halt.is_set():
+                await self.menu_halt.wait()
             else:
                 print("Choose option:")
                 print("[M]essage | [S]end files | [C]hange fragment size | [Q]uit ")
 
                 choice = None
-                # TODO: if I keep the HALT in input handler i should be able to safely remove this one here and also add a classic get() with no exception throwing
-                while self.ConnInfo.CONNECTION:
+                while True:
                     try:
-                        if self.Halt.is_set():
-                            await self.Halt.wait()
-                            self.clear_queue()
+                        if self.menu_halt.is_set():
+                            continue
                         choice = self.INPUT.get_nowait()
                         break
                     except queue.Empty:
-                        time.sleep(0.2)
+                        time.sleep(0.1)
                         continue
                 # print("DBG: outside the input loop")
-                if self.Halt.is_set():
+                if self.menu_halt.is_set() or not self.ConnInfo.CONNECTION:
                     continue
 
                 match choice.lower():
                     case 'm':
-                        print("INFO: sending message...")
+                        print("INFO: Message sending")
                         await self.send_message()
                         continue
                     case 's':
-                        print("INFO: sending file...")
+                        print("INFO: File sending")
                         await self.send_file()
                         continue
                     case 'c':
                         self.prompt_frag_change()
+                        continue
                     case 'q':
                         print("INFO: quiting...")
                         self.ConnInfo.CONNECTION = False
@@ -486,6 +502,7 @@ class Peer:
 
     def process_frag(self, pkt):
         if pkt.flag == Flags.FRAG.value:
+            self.get_start_time()
             if pkt.sequence_number == self.ConnInfo.current_seq:
                 # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.file_data += pkt.data
@@ -496,6 +513,7 @@ class Peer:
                     self.file_data += pkt.data
                     self.update_current(pkt.seq_offset + 1)
                     if pkt.flag == Flags.FRAG_F.value:
+                        self.get_end_time()
                         threading.Thread(target=self.save_file).start()
 
             elif pkt.sequence_number > self.ConnInfo.current_seq:
@@ -507,6 +525,7 @@ class Peer:
                 # print("DBG: Fin is in order")
                 self.file_data += pkt.data
                 self.update_current(pkt.seq_offset + 1)
+                self.get_end_time()
                 threading.Thread(target=self.save_file).start()
             else:
                 # print("DBG: Fin is out of order")
@@ -521,6 +540,7 @@ class Peer:
             if inp != "K" or "k":
                 try:
                     self.change_frag_size(int(inp))
+                    print(f"INFO: Framentation size changed to: {self.frag_size}")
                     break
                 except ValueError:
                     print("ERROR: Wrong input")
@@ -529,28 +549,27 @@ class Peer:
                 return
 
     def save_file(self):
-        print("Incoming file choose save location...")
-        self.Halt.set() # yaay
-        print("DBG: halting menu")
+        self.get_end_time()
+        if self.get_transmission_time():
+            print(f"INFO: File received time-{(self.trans_time//60):.0f}m:{(self.trans_time%60):.2f}s")
         self.clear_queue()
         while True:
-            print("Directory path [--quit]: ")
+            print("Path to save directory [--quit]: ")
             # TODO: possible to replace with classic input()
             url = self.INPUT.get()
             if os.path.isdir(url):
                 break
             if url == "--quit":
-                print("Discarding file...")
-                self.Halt.clear()
+                print("INFO: Discarding file...")
+                #self.menu_halt.clear()
                 self.clear_file_buffers()
+                print("INFO: file discarded")
                 return
             print("ERROR: Couldn't find the directory")
 
-        self.Halt.clear()
-        print("DBG: Resuming menu")
         with open(url + "\\" + self.file_name, "wb") as file:
             file.write(self.file_data)
-        print("INFO: File saved successfully")
+        print("INFO: File saved successfully to: " + url + "\\" + self.file_name)
         self.clear_file_buffers()
 
     def clear_file_buffers(self):
@@ -562,9 +581,26 @@ class Peer:
         if pkt.sequence_number != self.ConnInfo.current_seq:
             return
         self.file_name = pkt.data.decode()
+        print("INFO: Incoming file: " + self.file_name)
+        print("INFO: Halting menu")
         self.update_current(pkt.seq_offset + 1)
         self.send_ack(pkt)
     # the thread will start if it didn't receive a file packet in a longer time it's going to clear buffer
     # But I also need to take care of loosing conection as that can trigger buffer clearing
+    def get_start_time(self):
+        if self.start_time == 0:
+            self.trans_time = 0
+            self.start_time = time.time()
+        pass
 
+    def get_end_time(self):
+        self.end_time = time.time()
+        pass
+    def get_transmission_time(self):
+        if self.start_time != 0:
+            self.trans_time = self.end_time - self.start_time
+            self.end_time = 0
+            self.start_time = 0
+            return True
+        return False
 

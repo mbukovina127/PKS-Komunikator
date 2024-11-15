@@ -2,6 +2,11 @@ import threading
 
 from peer import Peer, ConnInfo
 
+
+# TODO: connection param fail-end loop
+# TODO: lost connection retry-end loop
+
+
 if __name__ == '__main__':
     listening_port = input("Listening port def[50601]: ")
     if (listening_port == ''):
