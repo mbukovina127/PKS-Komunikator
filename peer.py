@@ -14,13 +14,10 @@ from packetsending import ThreadingSet, Sender, SlidingWindow
 HEADER_SIZE = 7
 MAX_SEQ_NUMBER = 4_000_000_000
 
-# TODO: FIN/ termination implemeted
 # TODO: STR packet will block the console
 # TODO: better menu
 
 # TODO: better sequence number updaters
-# TODO: Ability to receive two files in sequence
-# TODO: check frag size in case its too big
 # TODO: fix exceptions
 
 
@@ -31,6 +28,7 @@ class ConnInfo:
         self.dest_port = port_trs
     ### keep_alive
         self.pulse = 3
+        self.epoch = 0
     ### states
         self.CONNECTION = False
         self.fin_recv = False
@@ -117,7 +115,8 @@ class Peer:
         return self.ConnInfo.dest_seq
 
     def change_dest_seq(self, sequence_number):
-        self.ConnInfo.dest_seq = (self.ConnInfo.dest_seq + sequence_number) % MAX_SEQ_NUMBER
+        print(f"DBG: ack offset {sequence_number}")
+        self.ConnInfo.dest_seq = sequence_number % MAX_SEQ_NUMBER
 
     def update_current(self, offset: int = 1):
         self.ConnInfo.current_seq += offset
@@ -129,6 +128,8 @@ class Peer:
             raise ValueError()
         self.frag_size = frag_size
 
+    def time_epoch(self):
+        self.ConnInfo.epoch = time.time()
 
 ### Message function
 
@@ -232,20 +233,21 @@ class Peer:
 
     #TODO: this could be another thread that takes from the queue of received packets
     def parse_packet(self, pkt: Packet):
-        # if not self.verify_packet(pkt):
-        #     return False
+        self.time_epoch()
+        print(f"DBG: dsq - {self.ConnInfo.dest_seq} csq - {self.ConnInfo.current_seq}")
         match (pkt.flag):
             case Flags.KEEP_ALIVE.value:
                 # print("DBG: KEEP ALIVE rec")
+                self.send_packet(Packet.build(Flags.KAACK.value))
+                return
+            case Flags.KAACK.value:
+                # print("DBG: KEEP ALIVE ACK rec")
                 with self.ka_lock:
                     self.ConnInfo.pulse = 3
-                return
             #ack has seq of dest_seq + 1
             case Flags.ACK.value:
                 if self.ConnInfo.fin_recv:
-                    # we remove fin from sender
-                    # and we quit
-                    print("DBG: Ack for fin received")
+                    # print("DBG: Ack for fin received")
                     self.ack_received(pkt)
                     threading.Timer( 1, self.quit).start()
                 self.ack_received(pkt)
@@ -315,21 +317,19 @@ class Peer:
 
 ### KEEP ALIVE FUNCTION
 
-    def keep_alive(self):
+    def KEEP_ALIVE(self):
+        print("DBG: Keep alive running")
         while self.ConnInfo.CONNECTION:
-            if self.ConnInfo.pulse == 0:
-                print("ERROR: Connection lost... heart beat not received")
-                self.ConnInfo.CONNECTION = False
-                return
-            with self.ka_lock:
-                self.ConnInfo.pulse -= 1
-            self.heart_beat()
-            # print("DBG: heart beat sent")
+            # print(f"DBG: last packet received at: {self.ConnInfo.epoch} current time is: {time.time()} difference: {time.time() - self.ConnInfo.epoch}")
+            if time.time() - self.ConnInfo.epoch > self.KA_time:
+                if self.ConnInfo.pulse < 0:
+                    self.ConnInfo.CONNECTION = False
+                    continue
+                self.send_packet(Packet.build(flags=Flags.KEEP_ALIVE.value))
+                with self.ka_lock:
+                    self.ConnInfo.pulse -= 1
             time.sleep(self.KA_time)
 
-    def heart_beat(self):
-        ka_pkt = Packet.build(flags=Flags.KEEP_ALIVE.value)
-        self.transmitting_socket.sendto(ka_pkt.to_bytes(), (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
 
 ### HANDSHAKE FUNCTIONS
     # TODO: could move the 10s timeout into another thread
@@ -409,7 +409,7 @@ class Peer:
 
     def communicate(self):
         listening = threading.Thread(target=self.LISTENER, args=(1500,))
-        keep_alive = threading.Thread(target=self.keep_alive)
+        keep_alive = threading.Thread(target=self.KEEP_ALIVE)
         sending = threading.Thread(target=self.SENDER.run)
         listening.start()
         sending.start()
@@ -423,11 +423,14 @@ class Peer:
 
 ### input
     def handle_input(self):
-        while True:
-            inp = input()
-            if inp.strip():
-                # print("... put into queue")
-                self.INPUT.put(inp)
+        try:
+            while True:
+                inp = input()
+                if inp.strip():
+                    # print("... put into queue")
+                    self.INPUT.put(inp)
+        except UnicodeDecodeError:
+            return
     def clear_queue(self):
         # i geuss a bit risky but we are getting user input so it should be fine
         while not self.INPUT.empty(): self.INPUT.get_nowait()
@@ -497,7 +500,6 @@ class Peer:
 
 
         # TODO: I will do this without STR flag at first Ill see how it's going to go
-        # print("DBG: splitting message first seq is " + str(seq))
         str_pkt = Packet.build(Flags.STR.value, sequence_number=self.ConnInfo.dest_seq, data=os.path.basename(url).encode())
         seq_old = self.ConnInfo.dest_seq
         self.SENDER.queue_packet(str_pkt)
@@ -526,7 +528,7 @@ class Peer:
         if pkt.flag == Flags.FRAG.value:
             self.get_start_time()
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.file_data += pkt.data
                 self.update_current(pkt.seq_offset + 1)
                 # check out of order packets
@@ -539,18 +541,18 @@ class Peer:
                         threading.Thread(target=self.save_file).start()
 
             elif pkt.sequence_number > self.ConnInfo.current_seq:
-                # print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.file_buffer[pkt.sequence_number] = pkt
 
         else: # only other one is MSG_F
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                # print("DBG: Fin is in order")
+                print("DBG: Fin is in order")
                 self.file_data += pkt.data
                 self.update_current(pkt.seq_offset + 1)
                 self.get_end_time()
                 threading.Thread(target=self.save_file).start()
             else:
-                # print("DBG: Fin is out of order")
+                print("DBG: Fin is out of order")
                 self.file_buffer[pkt.sequence_number] = pkt
 
         self.send_ack(pkt)

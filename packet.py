@@ -8,6 +8,7 @@ class Flags(Enum):
     SYN = 1
     ACK = 2
     KEEP_ALIVE = 3
+    KAACK = 13
     FIN = 4
     STR = 5
     FRAG = 6

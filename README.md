@@ -24,6 +24,7 @@ PKS 2024 (tester: Filip Brutovský)
 
 ### 4. Udržanie spojenia (Keep-Alive)
 - [x] Jednoducha implementacia
+- [x] Mutex
 - [ ] Reagovanie počas prenosov
 
 ### 5. Lua skript vo Wiresharku
