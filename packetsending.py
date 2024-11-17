@@ -106,10 +106,10 @@ class Sender:
 ### Retransmitting
     def send_from_window(self, ack_sequence_number):
         packet_to_send = self.WINDOW.get(ack_sequence_number).to_bytes()
-        pkt = simulate_packet_corruption(packet_to_send, 0.5)
+        # packet_to_send = simulate_packet_corruption(packet_to_send, 0.2)
 
         with self.send_lock:
-            self.socket.sendto(pkt, (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
+            self.socket.sendto(packet_to_send, (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
             # print("DBG: sent pkt from window " + str(ack_sequence_number))
 
     def retransmit(self, ack_sequence_number):

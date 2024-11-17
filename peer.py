@@ -12,6 +12,7 @@ from packet import Packet, Flags
 from packetsending import ThreadingSet, Sender, SlidingWindow
 
 HEADER_SIZE = 7
+MAX_SEQ_NUMBER = 4_000_000_000
 
 # TODO: FIN/ termination implemeted
 # TODO: STR packet will block the console
@@ -110,14 +111,17 @@ class Peer:
 
 ### Working with parameters
 
-    def update_expected(self, offset: int = 1):
-        self.ConnInfo.dest_fallback = self.ConnInfo.dest_seq
+    def update_dest(self, offset: int = 1):
         self.ConnInfo.dest_seq += offset
+        self.ConnInfo.dest_seq = self.ConnInfo.dest_seq % MAX_SEQ_NUMBER
         return self.ConnInfo.dest_seq
 
+    def change_dest_seq(self, sequence_number):
+        self.ConnInfo.dest_seq = (self.ConnInfo.dest_seq + sequence_number) % MAX_SEQ_NUMBER
+
     def update_current(self, offset: int = 1):
-        self.ConnInfo.current_fallback = self.ConnInfo.current_seq
         self.ConnInfo.current_seq += offset
+        self.ConnInfo.current_seq = self.ConnInfo.current_seq % MAX_SEQ_NUMBER
         return self.ConnInfo.current_seq
 
     def change_frag_size(self, frag_size: int):
@@ -146,11 +150,12 @@ class Peer:
 
     def split_message(self, message: str):
         seq = self.ConnInfo.dest_seq
-        msg_chunks = [
-            (Packet.build(flags=Flags.MSG.value
-                           ,sequence_number=(seq + i*(self.frag_size+1))
-                           ,data=(message[i*self.frag_size: i*self.frag_size+ self.frag_size]).encode()) )
-            for i in range(0, math.ceil(len(message) / self.frag_size))]
+        msg_chunks = []
+        for i in range(0, math.ceil(len(message) / self.frag_size)):
+            send_seq = seq + i*(self.frag_size+1) % MAX_SEQ_NUMBER
+            msg_chunks.append(Packet.build(flags=Flags.MSG.value
+                           ,sequence_number=(send_seq)
+                           ,data=(message[i*self.frag_size: i*self.frag_size+ self.frag_size]).encode()))
         msg_chunks[-1].changeFlag(Flags.MSG_F.value)
 
         if len(msg_chunks) > 1:
@@ -170,14 +175,13 @@ class Peer:
         print(f"---{self.message}")
         self.message = ""
 
-    # TODO: wonky as two fucks
     # but I guess it will do
     def process_MSG(self, pkt: Packet):
-        # print("DBG: processing MSG packet... message thus far: " + self.message)
+        print("DBG: processing MSG packet... message thus far: " + self.message)
         if pkt.flag == Flags.MSG.value:
             self.get_start_time()
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message += pkt.data.decode()
                 self.update_current(pkt.seq_offset + 1)
                 # check out of order packets
@@ -190,18 +194,18 @@ class Peer:
                         self.print_MSG()
 
             elif pkt.sequence_number > self.ConnInfo.current_seq:
-                # print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message_buffer[pkt.sequence_number] = pkt
 
         else: # only other one is MSG_F
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                # print("DBG: Fin is in order")
+                print("DBG: Fin is in order")
                 self.message += pkt.data.decode()
                 self.update_current(pkt.seq_offset + 1)
                 self.get_end_time()
                 self.print_MSG()
             else:
-                # print("DBG: Fin is out of order... pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                print("DBG: Fin is out of order... pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message_buffer[pkt.sequence_number] = pkt
 
         self.send_ack(pkt)
@@ -213,7 +217,7 @@ class Peer:
         if self.WINDOW.remove(pkt.sequence_number):
             if pkt.sequence_number > self.ConnInfo.dest_seq:
                 # print("DBG: Received ack...")
-                self.ConnInfo.dest_seq = pkt.sequence_number
+                self.change_dest_seq(pkt.sequence_number)
             return True
         return False
             # print("DBG: ack removed successfully" + str(pkt.sequence_number))
@@ -226,6 +230,7 @@ class Peer:
             print(f"INFO: Packet-{pkt.sequence_number} received -- fail")
             return False
 
+    #TODO: this could be another thread that takes from the queue of received packets
     def parse_packet(self, pkt: Packet):
         # if not self.verify_packet(pkt):
         #     return False
@@ -237,17 +242,12 @@ class Peer:
                 return
             #ack has seq of dest_seq + 1
             case Flags.ACK.value:
-                # I send fin
-                # They receive fin they set their flag on -- fin
-                # they send fin -- fin
-                # I recieve and I set my flag on -- fin
-                # they send ack -- fin
-                # I send ack -- fin
-                # I get ack and quit
-                # they get ack and quit
                 if self.ConnInfo.fin_recv:
+                    # we remove fin from sender
+                    # and we quit
+                    print("DBG: Ack for fin received")
                     self.ack_received(pkt)
-                    self.quit()
+                    threading.Timer( 1, self.quit).start()
                 self.ack_received(pkt)
                 return
             # str seq of current
@@ -265,7 +265,8 @@ class Peer:
                     self.process_MSG(pkt)
                 return
             case Flags.FIN.value:
-                self.FIN_received()
+                if self.verify_packet(pkt):
+                    self.FIN_received(pkt)
                 return
             case _:
                 return
@@ -289,11 +290,21 @@ class Peer:
 
     def init_termination(self):
         print("INFO: Terminating connection")
-        self.send_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.ConnInfo.dest_seq))
+        self.SENDER.queue_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.ConnInfo.dest_seq))
 
-    def FIN_received(self):
-        self.send_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.ConnInfo.dest_seq))
-        self.ConnInfo.fin_recv = True
+    def FIN_received(self, pkt):
+        # if we received fin already we just send ack
+        if self.ConnInfo.fin_recv:
+            print("DBG: Second fin received sending ack for fin")
+            self.send_ack(pkt)
+        else:
+            print("DBG: First fin received")
+            #we get first fin we sed flag to true
+            self.ConnInfo.fin_recv = True
+            # we que fin it is going to send fin until it gets an ack from the the if above
+            # after we send it we move to packet parser ack
+            self.SENDER.queue_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.ConnInfo.dest_seq))
+            print("DBG: Sending fins")
 
     def quit(self):
         print("INFO: Closing connection...")
@@ -345,7 +356,7 @@ class Peer:
                 # print("DBG: new syn sent")
                 self.syn_send_received = True
                 time.sleep(0.5)
-                self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.update_expected()))
+                self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.update_dest()))
                 # print("DBG: ack sent")
                 continue
             #we receive ack after we received syn packet
@@ -363,15 +374,18 @@ class Peer:
                 if self.ConnInfo.dest_seq == 0: # syn packet arrives after we send ours
                     # print("DBG: expected seq is empty")
                     self.ConnInfo.dest_seq = rec_pkt.sequence_number # we copy its sq number
-                    ack_pkt, addr = self.listening_socket.recvfrom(1500)
-                    ack_pkt = Packet(ack_pkt)
+                    try:
+                        ack_pkt, addr = self.listening_socket.recvfrom(1500)
+                        ack_pkt = Packet(ack_pkt)
                     # print("DBG: ack received after syn sent")
-                    if ack_pkt.flag == Flags.ACK.value: # we wait for an ack packet for our syn packet
-                        if ack_pkt.sequence_number == self.ConnInfo.current_seq +1: # it has to have seq +1 of the one we sent
-                            self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.update_expected())) # we send ack for the one we received
-                            self.ConnInfo.CONNECTION = True
-                            self.update_current()
-                            return
+                        if ack_pkt.flag == Flags.ACK.value: # we wait for an ack packet for our syn packet
+                            if ack_pkt.sequence_number == self.ConnInfo.current_seq +1: # it has to have seq +1 of the one we sent
+                                self.send_packet(Packet.build(flags=Flags.ACK.value, sequence_number=self.update_dest())) # we send ack for the one we received
+                                self.ConnInfo.CONNECTION = True
+                                self.update_current()
+                                return
+                    except socket.timeout:
+                        continue
                         # print("DBG: seq doesn't match")
             self.ConnInfo.current_seq = 0
             self.ConnInfo.dest_seq = 0
@@ -399,7 +413,7 @@ class Peer:
         sending = threading.Thread(target=self.SENDER.run)
         listening.start()
         sending.start()
-        # keep_alive.start()
+        keep_alive.start()
 
         asyncio.run(self.menu())
 
@@ -454,8 +468,8 @@ class Peer:
                         self.prompt_frag_change()
                         continue
                     case 'q':
-                        print("INFO: quiting...")
-                        self.ConnInfo.CONNECTION = False
+                        print("INFO: Quiting...")
+                        self.init_termination()
                         break
 
                     case _:
@@ -490,15 +504,23 @@ class Peer:
         # wait until you get an ack for str
         while seq_old == self.ConnInfo.dest_seq: time.sleep(0.1)
         seq = self.ConnInfo.dest_seq
-        fragments = [( Packet.build(
-            flags=Flags.FRAG.value,
-            sequence_number=(seq + i*(self.frag_size+1))
-                           ,data=(data[i*self.frag_size: i*self.frag_size+ self.frag_size])))
-            for i in range(0, math.ceil(len(data) / self.frag_size))]
+        # splitting packets
+        fragments = []
+        for i in range(0, math.ceil(len(data) / self.frag_size)):
+            send_seq = (seq + i*(self.frag_size+1)) % MAX_SEQ_NUMBER # looping over sequence numbers
+            fragments.append(Packet.build(
+                flags=Flags.FRAG.value,
+                sequence_number=send_seq,
+                data=data[i*self.frag_size: i*self.frag_size+ self.frag_size]
+            ))
         fragments[-1].changeFlag(Flags.FRAG_F.value)
-        # fragments.insert(0, Packet.build(Flags.STR.value, sequence_number=self.ConnInfo.current_seq, data=))
+
         self.SENDER.queue_packet(fragments)
-        print("INFO: file is being sent...")
+        print(f"INFO: Sending file: "
+              f" size-{(len(data)//1024)}KB |"
+              f" number of fragments-{len(fragments)} |"
+              f" fragment size-{self.frag_size} |"
+              f"{' last fragment-' + str(fragments[-1].seq_offset) + ' |' if fragments[-1].seq_offset < self.frag_size else ''}")
 
     def process_frag(self, pkt):
         if pkt.flag == Flags.FRAG.value:
@@ -603,4 +625,6 @@ class Peer:
             self.start_time = 0
             return True
         return False
+
+
 

@@ -5,7 +5,7 @@ PKS 2024 (tester: Filip Brutovský)
 - [x] Connection
   - [x] TCP handshake
   - [x] Keep Alive
-  - [ ] Closing connection
+  - [x] Closing connection
 - [x] Menu
 
 ### 2. - 3. Prenos textu/súboru - fragmentácia
