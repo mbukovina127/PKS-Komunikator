@@ -83,7 +83,7 @@ class SlidingWindow:
             return sequence_number in self._dict
 
 class Sender:
-    def __init__(self, socket, conn_info, lock, window: SlidingWindow, win_limit=10):
+    def __init__(self, socket, conn_info, lock, window: SlidingWindow, win_limit=100):
         self.socket = socket
         self.ConnInfo = conn_info
         self.send_lock = lock
@@ -115,7 +115,7 @@ class Sender:
     def retransmit(self, ack_sequence_number):
         while True:
             #if its still in the window Im going to assume it was not acknowledged
-            if self.WINDOW.contains(ack_sequence_number) and isinstance(self.WINDOW.get(ack_sequence_number), Packet):
+            if self.WINDOW.contains(ack_sequence_number):
                 self.send_from_window(ack_sequence_number)
             else:
                 return
@@ -124,7 +124,7 @@ class Sender:
 ### main
 
     def run(self):
-        print("DBG: sender running")
+        # print("DBG: sender running")
         while True:
             while (not self.ConnInfo.CONNECTION
                    or self.WINDOW.__len__() >= self.WIN_limit):
@@ -132,7 +132,6 @@ class Sender:
 
             while self.WINDOW.__len__() < self.WIN_limit:
                 s_pkt = self.PACKETS.get() # blocking should matter much here
-                # TODO: I have no idea what I should do when I lose connection
                 # line | offset for data size | 1 for expected acknowledge
                 ack_seq = s_pkt.sequence_number + s_pkt.seq_offset + 1
                 self.WINDOW.add(ack_seq, s_pkt)

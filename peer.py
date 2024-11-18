@@ -8,15 +8,17 @@ import threading
 import time
 from enum import verify
 
+from networkx.utils.configs import config
+
 from packet import Packet, Flags
 from packetsending import ThreadingSet, Sender, SlidingWindow
 
 HEADER_SIZE = 7
 MAX_SEQ_NUMBER = 4_000_000_000
-
+# TODO: better input reading and prompts
 # TODO: STR packet will block the console
 # TODO: better menu
-
+# TODO: terminate file sending a vycistit cache suboru
 # TODO: better sequence number updaters
 # TODO: fix exceptions
 
@@ -136,8 +138,12 @@ class Peer:
     async def send_message(self):
         self.clear_queue()
         #getting fragment size
-        print("Write message [--quit]: ", end='')
-        inp = self.INPUT.get()
+        while True:
+            print("Write message [--quit]: ", end='')
+            inp = self.INPUT.get()
+            if inp == '\n':
+                continue
+            break
         if inp.lower() == "--quit":
             print("INFO: Not sending any message")
             return True
@@ -234,7 +240,7 @@ class Peer:
     #TODO: this could be another thread that takes from the queue of received packets
     def parse_packet(self, pkt: Packet):
         self.time_epoch()
-        print(f"DBG: dsq - {self.ConnInfo.dest_seq} csq - {self.ConnInfo.current_seq}")
+        # print(f"DBG: dsq - {self.ConnInfo.dest_seq} csq - {self.ConnInfo.current_seq}")
         match (pkt.flag):
             case Flags.KEEP_ALIVE.value:
                 # print("DBG: KEEP ALIVE rec")
@@ -324,6 +330,7 @@ class Peer:
             if time.time() - self.ConnInfo.epoch > self.KA_time:
                 if self.ConnInfo.pulse < 0:
                     self.ConnInfo.CONNECTION = False
+                    print("INFO: Keep alive - connection lost - no reply")
                     continue
                 self.send_packet(Packet.build(flags=Flags.KEEP_ALIVE.value))
                 with self.ka_lock:
@@ -421,7 +428,7 @@ class Peer:
         keep_alive.join(0)
         sending.join(0)
 
-### input
+### INPUT
     def handle_input(self):
         try:
             while True:
@@ -429,7 +436,10 @@ class Peer:
                 if inp.strip():
                     # print("... put into queue")
                     self.INPUT.put(inp)
+                else:
+                    self.INPUT.put("\n")
         except UnicodeDecodeError:
+            print("INFO: Quiting input handler thread")
             return
     def clear_queue(self):
         # i geuss a bit risky but we are getting user input so it should be fine
@@ -455,7 +465,7 @@ class Peer:
                         time.sleep(0.1)
                         continue
                 # print("DBG: outside the input loop")
-                if self.menu_halt.is_set() or not self.ConnInfo.CONNECTION:
+                if choice == '\n' or self.menu_halt.is_set() or not self.ConnInfo.CONNECTION:
                     continue
 
                 match choice.lower():
@@ -489,8 +499,13 @@ class Peer:
         while True:
             print("File path [--quit]: ")
             url = self.INPUT.get()
+            if url == '\n':
+                continue
             if os.path.isfile(url):
                 break
+            if url == "--quit":
+                print("INFO: Quiting...")
+                return
             print("ERROR: couldn't find the file")
 
         # split and send the file
@@ -518,7 +533,8 @@ class Peer:
         fragments[-1].changeFlag(Flags.FRAG_F.value)
 
         self.SENDER.queue_packet(fragments)
-        print(f"INFO: Sending file: "
+        print(f"INFO: Sending file:"
+              f" file name-{os.path.basename(url)}"
               f" size-{(len(data)//1024)}KB |"
               f" number of fragments-{len(fragments)} |"
               f" fragment size-{self.frag_size} |"
@@ -561,16 +577,18 @@ class Peer:
         while True:
             print("Fragment size [1-1465] | [K]eep default: ", end='')
             inp = self.INPUT.get()
-            if inp != "K" or "k":
-                try:
-                    self.change_frag_size(int(inp))
-                    print(f"INFO: Framentation size changed to: {self.frag_size}")
-                    break
-                except ValueError:
-                    print("ERROR: Wrong input")
-                    continue
-            else:
+            if inp == '\n':
+                continue
+            if inp == "K" or inp == "k":
                 return
+            try:
+                self.change_frag_size(int(inp))
+                print(f"INFO: Fragmentation size changed to: {self.frag_size}")
+                break
+            except ValueError:
+                print("ERROR: Wrong input")
+                continue
+
 
     def save_file(self):
         self.get_end_time()
@@ -581,6 +599,8 @@ class Peer:
             print("Path to save directory [--quit]: ")
             # TODO: possible to replace with classic input()
             url = self.INPUT.get()
+            if url == '\n':
+                continue
             if os.path.isdir(url):
                 break
             if url == "--quit":
@@ -593,7 +613,7 @@ class Peer:
 
         with open(url + "\\" + self.file_name, "wb") as file:
             file.write(self.file_data)
-        print("INFO: File saved successfully to: " + url + "\\" + self.file_name)
+        print("INFO: File saved successfully to: " + url + "\\" + self.file_name + "-" + str(self.file_data.__sizeof__()//1024) + "KB")
         self.clear_file_buffers()
 
     def clear_file_buffers(self):

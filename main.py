@@ -1,5 +1,7 @@
 import threading
 
+from networkx.utils.configs import config
+
 from peer import Peer, ConnInfo
 
 
@@ -8,28 +10,35 @@ from peer import Peer, ConnInfo
 
 
 if __name__ == '__main__':
-    listening_port = input("Listening port def[50601]: ")
-    if (listening_port == ''):
-        listening_port = 50601
-    else:
-        listening_port = int(listening_port)
+    app = None
+    while True:
+        try:
+            listening_port = input("Listening port def[50601]: ")
+            if (listening_port == ''):
+                listening_port = 50601
+            else:
+                listening_port = int(listening_port)
 
-    transmitting_port = input("Transmitting port def[50602]: ")
-
-
-    if (transmitting_port == ''):
-        transmitting_port = 50602
-    else:
-        transmitting_port = int(transmitting_port)
+            transmitting_port = input("Transmitting port def[50602]: ")
 
 
-    ip = input("IP address to connect def[127.0.0.1]: ")
+            if (transmitting_port == ''):
+                transmitting_port = 50602
+            else:
+                transmitting_port = int(transmitting_port)
 
-    if (ip == ''):
-        ip = "127.0.0.1"
 
-    cInfo = ConnInfo(ip, listening_port, transmitting_port)
-    app = Peer(cInfo)
+            ip = input("IP address to connect def[127.0.0.1]: ")
+
+            if (ip == ''):
+                ip = "127.0.0.1"
+            cInfo = ConnInfo(ip, listening_port, transmitting_port)
+            app = Peer(cInfo)
+            break
+        except ValueError:
+            print("ERROR: Wrong input")
+        except OSError:
+            print("ERROR: Ports already in use")
 
     ### start of thread
     input_handler = threading.Thread(target=app.handle_input)
