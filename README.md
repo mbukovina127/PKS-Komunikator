@@ -1,6 +1,8 @@
 **Marko Bukovina**
 PKS 2024 (tester: Filip Brutovský)
 
+
+
 ## Completion
 - [x] Connection
 - [x] Input loop
@@ -36,4 +38,17 @@ PKS 2024 (tester: Filip Brutovský)
 ### 6. Finálna dokumentácia
 - [ ] Done 
 
-# Zadanie
+
+# Podmienky
+| podmienka | stav     |
+|-----------|----------|
+| 1         | **yes**  |
+| 2         | **yes**  |
+| 3         | **yes**  |
+| 4         | **yes**  |
+| 5         | **yes**  |
+| 6         | **yes**  |
+| 7         | **yes**  |
+| 8         | **yes**  |
+| 9         | **yes**  |
+
