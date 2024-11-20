@@ -78,6 +78,10 @@ class SlidingWindow:
         except KeyError:
             return False
 
+    def clear_dictionary(self):
+        with self._lock:
+            self._dict.clear()
+
     def contains(self, sequence_number):
         with self._lock:
             return sequence_number in self._dict
@@ -113,13 +117,16 @@ class Sender:
             # print("DBG: sent pkt from window " + str(ack_sequence_number))
 
     def retransmit(self, ack_sequence_number):
-        while True:
+        retries = 5
+        while retries > 0:
+            retries -= 1
             #if its still in the window Im going to assume it was not acknowledged
             if self.WINDOW.contains(ack_sequence_number):
                 self.send_from_window(ack_sequence_number)
             else:
                 return
             time.sleep(self.window_timer)
+        self.end_packet_sending()
 
 ### main
 
@@ -138,3 +145,14 @@ class Sender:
                 # print("DBG: packet in window")
                 threading.Thread(target=self.retransmit, args=(ack_seq,)).start()
 
+
+    # TODO: I don't know if this is going to work
+    def end_packet_sending(self):
+        # how the clear window of
+        print("ERROR: Failure to send packets... clearing cached packets")
+        self.WINDOW.clear_dictionary()
+        try:
+            while True:
+                self.PACKETS.get_nowait()
+        except queue.Empty:
+            return

@@ -6,22 +6,20 @@ import random
 import socket
 import threading
 import time
-from enum import verify
 
-from networkx.utils.configs import config
 
 from packet import Packet, Flags
 from packetsending import ThreadingSet, Sender, SlidingWindow
 
 HEADER_SIZE = 7
 MAX_SEQ_NUMBER = 4_000_000_000
+
 # TODO: better input reading and prompts
 # TODO: STR packet will block the console
 # TODO: better menu
 # TODO: terminate file sending a vycistit cache suboru
 # TODO: better sequence number updaters
 # TODO: fix exceptions
-
 
 class ConnInfo:
     def __init__(self, ip, port_lst, port_trs):
@@ -490,10 +488,9 @@ class Peer:
                         continue
 
 ### FILE functions
+
     #TODO: setting up a timeout function that stops clears file buffers if no "file" packet has been sent in a while
     #TODO: it should start after receiving a STR packet
-
-
     async def send_file(self):
         self.clear_queue()
         while True:
@@ -544,7 +541,7 @@ class Peer:
         if pkt.flag == Flags.FRAG.value:
             self.get_start_time()
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.file_data += pkt.data
                 self.update_current(pkt.seq_offset + 1)
                 # check out of order packets
@@ -557,18 +554,18 @@ class Peer:
                         threading.Thread(target=self.save_file).start()
 
             elif pkt.sequence_number > self.ConnInfo.current_seq:
-                print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+#                 print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.file_buffer[pkt.sequence_number] = pkt
 
         else: # only other one is MSG_F
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                print("DBG: Fin is in order")
+#                 print("DBG: Fin is in order")
                 self.file_data += pkt.data
                 self.update_current(pkt.seq_offset + 1)
                 self.get_end_time()
                 threading.Thread(target=self.save_file).start()
             else:
-                print("DBG: Fin is out of order")
+#                 print("DBG: Fin is out of order")
                 self.file_buffer[pkt.sequence_number] = pkt
 
         self.send_ack(pkt)

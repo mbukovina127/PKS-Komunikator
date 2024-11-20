@@ -1,4 +1,3 @@
-import random
 from enum import Enum
 
 import crcmod
@@ -38,7 +37,6 @@ class Packet:
         pkt = Packet(raw_data + crc)
         return pkt
 
-    # TODO: compare Chekcsum
     @staticmethod
     def checkChecksum(pkt: 'Packet') -> bool:
         mine = crc16_fun(pkt.to_bytes_wo_crc())
@@ -48,12 +46,6 @@ class Packet:
             return True
         # print("DBG: incorrect checksum mine:" + str(mine) + " packets" + str(pkts))
         return False
-
-    # @staticmethod
-    # def corrupt(pkt: 'Packet'):
-    #     if random.random() < 0.5:
-    #         pkt.data = pkt.data + bytes(1)
-
 
     def changeFlag(self, newFlag: int):
             self.flag = newFlag.to_bytes(1, byteorder='big', signed=False)
