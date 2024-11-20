@@ -18,8 +18,8 @@ PKS 2024 (tester: Filip Brutovský)
 - [x] Rozdelenie textu/suboru
 - [x] Poslanie bez rodelenia "kinda"
 - [x] Vypisanie informacii o prenose suboru
-  - [ ] vypis pri prijati suboru velkost a nazov 
-  - [ ] "chyba ak posielam len jeden subor na strane prijmatela lebo posielam iba jeden fin tak nevie ako dlho prenos trval kedze som to netimoval ale da sa to poriesit hodnotov premenych co som aj robil neviem preco to nejde"
+  - [x] vypis pri prijati suboru velkost a nazov 
+  - [x] "chyba ak posielam len jeden subor na strane prijmatela lebo posielam iba jeden fin tak nevie ako dlho prenos trval kedze som to netimoval ale da sa to poriesit hodnotov premenych co som aj robil neviem preco to nejde"
 - **ARQ Selective repeat**
   - [x] Sender side
   - [x] Receiver side

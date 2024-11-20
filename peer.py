@@ -4,6 +4,7 @@ import os
 import queue
 import random
 import socket
+import sys
 import threading
 import time
 
@@ -14,9 +15,6 @@ from packetsending import ThreadingSet, Sender, SlidingWindow
 HEADER_SIZE = 7
 MAX_SEQ_NUMBER = 4_000_000_000
 
-# TODO: better input reading and prompts
-# TODO: STR packet will block the console
-# TODO: better menu
 # TODO: terminate file sending a vycistit cache suboru
 # TODO: better sequence number updaters
 # TODO: fix exceptions
@@ -115,7 +113,7 @@ class Peer:
         return self.ConnInfo.dest_seq
 
     def change_dest_seq(self, sequence_number):
-        print(f"DBG: ack offset {sequence_number}")
+        # print(f"DBG: ack offset {sequence_number}")
         self.ConnInfo.dest_seq = sequence_number % MAX_SEQ_NUMBER
 
     def update_current(self, offset: int = 1):
@@ -173,20 +171,19 @@ class Peer:
         self.SENDER.queue_packet(msg_chunks)
 
     def print_MSG(self):
-        print("Message received")
         if self.get_transmission_time():
-            print(f"DBG: {self.trans_time}")
+            # print(f"DBG: {self.trans_time}")
             print(f"INFO: Transmission time-{(self.trans_time//60):.0f}m:{(self.trans_time%60):.2f}s")
-        print(f"---{self.message}")
+        print(f"Message received\n---{self.message}")
         self.message = ""
 
     # but I guess it will do
     def process_MSG(self, pkt: Packet):
-        print("DBG: processing MSG packet... message thus far: " + self.message)
+        # print("DBG: processing MSG packet... message thus far: " + self.message)
         if pkt.flag == Flags.MSG.value:
             self.get_start_time()
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+#                 print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message += pkt.data.decode()
                 self.update_current(pkt.seq_offset + 1)
                 # check out of order packets
@@ -199,18 +196,18 @@ class Peer:
                         self.print_MSG()
 
             elif pkt.sequence_number > self.ConnInfo.current_seq:
-                print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+#                 print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message_buffer[pkt.sequence_number] = pkt
 
         else: # only other one is MSG_F
             if pkt.sequence_number == self.ConnInfo.current_seq:
-                print("DBG: Fin is in order")
+#                 print("DBG: Fin is in order")
                 self.message += pkt.data.decode()
                 self.update_current(pkt.seq_offset + 1)
                 self.get_end_time()
                 self.print_MSG()
             else:
-                print("DBG: Fin is out of order... pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+#                 print("DBG: Fin is out of order... pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message_buffer[pkt.sequence_number] = pkt
 
         self.send_ack(pkt)
@@ -288,29 +285,30 @@ class Peer:
                 self.parse_packet(rec_pkt)
             except socket.timeout:
                 pass
+            except SystemExit:
+                return
             except OSError:
                 return
-        self.quit()
 
 ### Terminating fucntions
 
     def init_termination(self):
-        print("INFO: Terminating connection")
+        print("INFO: Terminating connection...")
         self.SENDER.queue_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.ConnInfo.dest_seq))
 
     def FIN_received(self, pkt):
         # if we received fin already we just send ack
         if self.ConnInfo.fin_recv:
-            print("DBG: Second fin received sending ack for fin")
+            # print("DBG: Second fin received sending ack for fin")
             self.send_ack(pkt)
         else:
-            print("DBG: First fin received")
+            # print("DBG: First fin received")
             #we get first fin we sed flag to true
             self.ConnInfo.fin_recv = True
             # we que fin it is going to send fin until it gets an ack from the the if above
             # after we send it we move to packet parser ack
             self.SENDER.queue_packet(Packet.build(flags=Flags.FIN.value, sequence_number=self.ConnInfo.dest_seq))
-            print("DBG: Sending fins")
+            # print("DBG: Sending fins")
 
     def quit(self):
         print("INFO: Closing connection...")
@@ -318,17 +316,18 @@ class Peer:
         self.listening_socket.close()
         self.transmitting_socket.close()
         print("INFO: Offline")
-
+        sys.exit(0)
 ### KEEP ALIVE FUNCTION
 
     def KEEP_ALIVE(self):
-        print("DBG: Keep alive running")
+        # print("DBG: Keep alive running")
         while self.ConnInfo.CONNECTION:
             # print(f"DBG: last packet received at: {self.ConnInfo.epoch} current time is: {time.time()} difference: {time.time() - self.ConnInfo.epoch}")
             if time.time() - self.ConnInfo.epoch > self.KA_time:
                 if self.ConnInfo.pulse < 0:
                     self.ConnInfo.CONNECTION = False
                     print("INFO: Keep alive - connection lost - no reply")
+                    sys.exit(13)
                     continue
                 self.send_packet(Packet.build(flags=Flags.KEEP_ALIVE.value))
                 with self.ka_lock:
@@ -439,6 +438,8 @@ class Peer:
         except UnicodeDecodeError:
             print("INFO: Quiting input handler thread")
             return
+        except SystemExit:
+            return
     def clear_queue(self):
         # i geuss a bit risky but we are getting user input so it should be fine
         while not self.INPUT.empty(): self.INPUT.get_nowait()
@@ -479,12 +480,11 @@ class Peer:
                         self.prompt_frag_change()
                         continue
                     case 'q':
-                        print("INFO: Quiting...")
                         self.init_termination()
                         break
 
                     case _:
-                        print("no such option...")
+                        print("ERROR: No such option!")
                         continue
 
 ### FILE functions
@@ -577,6 +577,7 @@ class Peer:
             if inp == '\n':
                 continue
             if inp == "K" or inp == "k":
+                print(f"INFO: Fragmentation size is: {self.frag_size}")
                 return
             try:
                 self.change_frag_size(int(inp))
@@ -589,8 +590,6 @@ class Peer:
 
     def save_file(self):
         self.get_end_time()
-        if self.get_transmission_time():
-            print(f"INFO: File received time-{(self.trans_time//60):.0f}m:{(self.trans_time%60):.2f}s")
         self.clear_queue()
         while True:
             print("Path to save directory [--quit]: ")
@@ -611,6 +610,8 @@ class Peer:
         with open(url + "\\" + self.file_name, "wb") as file:
             file.write(self.file_data)
         print("INFO: File saved successfully to: " + url + "\\" + self.file_name + "-" + str(self.file_data.__sizeof__()//1024) + "KB")
+        if self.get_transmission_time():
+            print(f"INFO: File received time-{(self.trans_time//60):.0f}m:{(self.trans_time%60):.2f}s")
         self.clear_file_buffers()
 
     def clear_file_buffers(self):
@@ -637,6 +638,7 @@ class Peer:
     def get_end_time(self):
         self.end_time = time.time()
         pass
+
     def get_transmission_time(self):
         if self.start_time != 0:
             self.trans_time = self.end_time - self.start_time

@@ -1,11 +1,8 @@
 import threading
 
-from networkx.utils.configs import config
 
 from peer import Peer, ConnInfo
 
-
-# TODO: connection param fail-end loop
 # TODO: lost connection retry-end loop
 
 

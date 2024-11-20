@@ -93,9 +93,12 @@ class Sender:
         self.send_lock = lock
         self.PACKETS = queue.Queue()
         self.WINDOW = window
+        #window
+        self.limit_lock = threading.Lock()
+        self.Hard_limit = False
         self.WIN_limit = win_limit
         #timer
-        self.window_timer = 0.3
+        self.window_timer = 0.1
 
 
 
@@ -117,17 +120,15 @@ class Sender:
             # print("DBG: sent pkt from window " + str(ack_sequence_number))
 
     def retransmit(self, ack_sequence_number):
-        retries = 5
-        while retries > 0:
-            retries -= 1
+        counter = 0
+        while self.ConnInfo.CONNECTION:
             #if its still in the window Im going to assume it was not acknowledged
             if self.WINDOW.contains(ack_sequence_number):
                 self.send_from_window(ack_sequence_number)
             else:
                 return
             time.sleep(self.window_timer)
-        self.end_packet_sending()
-
+            counter += 1
 ### main
 
     def run(self):
