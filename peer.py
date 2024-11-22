@@ -16,8 +16,9 @@ HEADER_SIZE = 7
 MAX_SEQ_NUMBER = 4_000_000_000
 
 # TODO: terminate file sending a vycistit cache suboru
-# TODO: better sequence number updaters
-# TODO: fix exceptions
+#       co ak nam nikdy nepride ocakavany seq num ale keep alive funguje
+#       potrebujeme dat casovy limit ak nepride packet ktory updatne seq number
+#       ak nic nepride potrebujeme prestat posielat subory
 
 class ConnInfo:
     def __init__(self, ip, port_lst, port_trs):
@@ -31,12 +32,8 @@ class ConnInfo:
         self.CONNECTION = False
         self.fin_recv = False
     ### sequence numbers
-        # I need to send to dest and expect ack of dest + offset + 1 when I receive ack
-
-        # current is all the non ack packets heading my way we send ack only from this number we don't receive ack packets here I reply with ack of current + 1
         self.current_seq = 0
         self.current_fallback = 0
-        # dest is all the non ack packets that I send we receive ack packets with this number
         self.dest_seq = 0
         self.dest_fallback = 0
 
@@ -70,22 +67,23 @@ class Peer:
         self.SENT = ThreadingSet()
         self.INPUT = queue.Queue()
         self.WINDOW = SlidingWindow()
+    ### Keep Alive
+        self.KA_time = 5
 
     ### MSG
         self.message = ''
         # dictionary of seq n of msg packet
         self.message_buffer = {}
-    ### Keep Alive
-        self.KA_time = 5
-
     ### files
+        self.STR_arrived = False
         self.file_name = ""
         self.file_data: bytes = bytes(0)
         self.file_buffer = {}
 
+        self.ok_time = 0
+        self.sending_err = False
     ### THREADS
         self.SENDER = Sender(socket=self.transmitting_socket, conn_info=self.ConnInfo, lock=self.send_lock, window=self.WINDOW)
-        # self.RECEIVER= Receiver(socket=self.listening_socket, conn_info=self.ConnInfo, s_lock=self.send_lock, ka_lock=self.ka_lock, window=self.WINDOW)
 
 
 ### PACKET FUNCTIONS
@@ -129,88 +127,23 @@ class Peer:
     def time_epoch(self):
         self.ConnInfo.epoch = time.time()
 
-### Message function
+    def time_incoming(self):
+        self.ok_time = time.time()
 
-    async def send_message(self):
-        self.clear_queue()
-        #getting fragment size
-        while True:
-            print("Write message [--quit]: ", end='')
-            inp = self.INPUT.get()
-            if inp == '\n':
-                continue
-            break
-        if inp.lower() == "--quit":
-            print("INFO: Not sending any message")
-            return True
-        if self.ConnInfo.CONNECTION:
-            self.split_message(inp)
-            print("INFO: Message sent")
-            return True
-        else:
-            print("ERROR: No connection")
-            return False
-
-    def split_message(self, message: str):
-        seq = self.ConnInfo.dest_seq
-        msg_chunks = []
-        for i in range(0, math.ceil(len(message) / self.frag_size)):
-            send_seq = seq + i*(self.frag_size+1) % MAX_SEQ_NUMBER
-            msg_chunks.append(Packet.build(flags=Flags.MSG.value
-                           ,sequence_number=(send_seq)
-                           ,data=(message[i*self.frag_size: i*self.frag_size+ self.frag_size]).encode()))
-        msg_chunks[-1].changeFlag(Flags.MSG_F.value)
-
-        if len(msg_chunks) > 1:
-            print(f"INFO: Sending message: "
-                  f" size-{len(message)} |"
-                  f" number of fragments-{len(msg_chunks)} |"
-                  f" fragment size-{self.frag_size} |"
-                  f"{' last fragment-' + str(msg_chunks[-1].seq_offset) + ' |' if msg_chunks[-1].seq_offset < self.frag_size else ''}")
-
-        self.SENDER.queue_packet(msg_chunks)
-
-    def print_MSG(self):
-        if self.get_transmission_time():
-            # print(f"DBG: {self.trans_time}")
-            print(f"INFO: Transmission time-{(self.trans_time//60):.0f}m:{(self.trans_time%60):.2f}s")
-        print(f"Message received\n---{self.message}")
-        self.message = ""
-
-    # but I guess it will do
-    def process_MSG(self, pkt: Packet):
-        # print("DBG: processing MSG packet... message thus far: " + self.message)
-        if pkt.flag == Flags.MSG.value:
-            self.get_start_time()
-            if pkt.sequence_number == self.ConnInfo.current_seq:
-#                 print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
-                self.message += pkt.data.decode()
-                self.update_current(pkt.seq_offset + 1)
-                # check out of order packets
-                while self.ConnInfo.current_seq in self.message_buffer:
-                    pkt = self.message_buffer.pop(self.ConnInfo.current_seq)
-                    self.message += pkt.data.decode()
-                    self.update_current(pkt.seq_offset + 1)
-                    if pkt.flag == Flags.MSG_F.value:
-                        self.get_end_time()
-                        self.print_MSG()
-
-            elif pkt.sequence_number > self.ConnInfo.current_seq:
-#                 print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
-                self.message_buffer[pkt.sequence_number] = pkt
-
-        else: # only other one is MSG_F
-            if pkt.sequence_number == self.ConnInfo.current_seq:
-#                 print("DBG: Fin is in order")
-                self.message += pkt.data.decode()
-                self.update_current(pkt.seq_offset + 1)
-                self.get_end_time()
-                self.print_MSG()
-            else:
-#                 print("DBG: Fin is out of order... pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
-                self.message_buffer[pkt.sequence_number] = pkt
-
-        self.send_ack(pkt)
+    def file_receiving_thread(self):
+        print(f"DBG: started checking")
+        while self.STR_arrived:
+            # if the last in order packet arrived less than 10 seconds ago
+            print(f"DBG: checking time: {time.time() - self.ok_time} with ok time being: {self.ok_time}" )
+            if time.time() - self.ok_time > 15:
+                if not self.sending_err:
+                    print("ERROR: Incorrect data arriving for 15 seconds clearing stored data in 5 seconds... ")
+                    threading.Timer(5, self.clear_file_buffers).start()
+                    self.sending_err = True
+                return
+            time.sleep(2)
+        # print("DBG: Ended successfully")
+        return
 
 ### Packet parser
     #handeling acks for our sent packet. Removing them from our window should suffice
@@ -259,6 +192,8 @@ class Peer:
                 return
             # Frag seq of current
             case Flags.FRAG.value | Flags.FRAG_F.value:
+                if self.sending_err or not self.STR_arrived:
+                    return
                 if self.verify_packet(pkt):
                     self.process_frag(pkt)
                 return
@@ -328,7 +263,6 @@ class Peer:
                     self.ConnInfo.CONNECTION = False
                     print("INFO: Keep alive - connection lost - no reply")
                     sys.exit(13)
-                    continue
                 self.send_packet(Packet.build(flags=Flags.KEEP_ALIVE.value))
                 with self.ka_lock:
                     self.ConnInfo.pulse -= 1
@@ -487,10 +421,93 @@ class Peer:
                         print("ERROR: No such option!")
                         continue
 
-### FILE functions
+    ### Message function
 
-    #TODO: setting up a timeout function that stops clears file buffers if no "file" packet has been sent in a while
-    #TODO: it should start after receiving a STR packet
+    async def send_message(self):
+        self.clear_queue()
+        # getting fragment size
+        while True:
+            print("Write message [--quit]: ", end='')
+            inp = self.INPUT.get()
+            if inp == '\n':
+                continue
+            break
+        if inp.lower() == "--quit":
+            print("INFO: Not sending any message")
+            return True
+        if self.ConnInfo.CONNECTION:
+            self.split_message(inp)
+            print("INFO: Message sent")
+            return True
+        else:
+            print("ERROR: No connection")
+            return False
+
+    def split_message(self, message: str):
+        seq = self.ConnInfo.dest_seq
+        msg_chunks = []
+        for i in range(0, math.ceil(len(message) / self.frag_size)):
+            send_seq = seq + i * (self.frag_size + 1) % MAX_SEQ_NUMBER
+            msg_chunks.append(Packet.build(flags=Flags.MSG.value
+                                           , sequence_number=(send_seq)
+                                           , data=(
+                message[i * self.frag_size: i * self.frag_size + self.frag_size]).encode()))
+        msg_chunks[-1].changeFlag(Flags.MSG_F.value)
+
+        if len(msg_chunks) > 1:
+            print(f"INFO: Sending message: "
+                  f" size-{len(message)} |"
+                  f" number of fragments-{len(msg_chunks)} |"
+                  f" fragment size-{self.frag_size} |"
+                  f"{' last fragment-' + str(msg_chunks[-1].seq_offset) + ' |' if msg_chunks[-1].seq_offset < self.frag_size else ''}")
+
+        self.SENDER.queue_packet(msg_chunks)
+
+    def print_MSG(self):
+        if self.get_transmission_time():
+            # print(f"DBG: {self.trans_time}")
+            print(f"INFO: Transmission time-{(self.trans_time // 60):.0f}m:{(self.trans_time % 60):.2f}s")
+        print(f"Message received\n---{self.message}")
+        self.message = ""
+
+    # but I guess it will do
+    def process_MSG(self, pkt: Packet):
+        # print("DBG: processing MSG packet... message thus far: " + self.message)
+        if pkt.flag == Flags.MSG.value:
+            self.get_start_time()
+            if pkt.sequence_number == self.ConnInfo.current_seq:
+                # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                self.message += pkt.data.decode()
+                self.update_current(pkt.seq_offset + 1)
+                # check out of order packets
+                while self.ConnInfo.current_seq in self.message_buffer:
+                    pkt = self.message_buffer.pop(self.ConnInfo.current_seq)
+                    self.message += pkt.data.decode()
+                    self.update_current(pkt.seq_offset + 1)
+                    if pkt.flag == Flags.MSG_F.value:
+                        self.get_end_time()
+                        self.print_MSG()
+
+                # set the ok time
+                self.time_incoming()
+
+            elif pkt.sequence_number > self.ConnInfo.current_seq:
+#                 print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                self.message_buffer[pkt.sequence_number] = pkt
+
+        else:  # only other one is MSG_F
+            if pkt.sequence_number == self.ConnInfo.current_seq:
+#                 print("DBG: Fin is in order")
+                self.message += pkt.data.decode()
+                self.update_current(pkt.seq_offset + 1)
+                self.get_end_time()
+                self.print_MSG()
+            else:
+#                 print("DBG: Fin is out of order... pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                self.message_buffer[pkt.sequence_number] = pkt
+
+        self.send_ack(pkt)
+### FILE functions
     async def send_file(self):
         self.clear_queue()
         while True:
@@ -510,15 +527,14 @@ class Peer:
         with open(url, "rb") as file:
             data = file.read()
 
-
-        # TODO: I will do this without STR flag at first Ill see how it's going to go
+        print("INFO: Sending first packet...")
         str_pkt = Packet.build(Flags.STR.value, sequence_number=self.ConnInfo.dest_seq, data=os.path.basename(url).encode())
         seq_old = self.ConnInfo.dest_seq
         self.SENDER.queue_packet(str_pkt)
         # wait until you get an ack for str
         while seq_old == self.ConnInfo.dest_seq: time.sleep(0.1)
         seq = self.ConnInfo.dest_seq
-        # splitting packets
+        print("INFO: Splitting file...")
         fragments = []
         for i in range(0, math.ceil(len(data) / self.frag_size)):
             send_seq = (seq + i*(self.frag_size+1)) % MAX_SEQ_NUMBER # looping over sequence numbers
@@ -552,7 +568,7 @@ class Peer:
                     if pkt.flag == Flags.FRAG_F.value:
                         self.get_end_time()
                         threading.Thread(target=self.save_file).start()
-
+                self.time_incoming()
             elif pkt.sequence_number > self.ConnInfo.current_seq:
 #                 print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.file_buffer[pkt.sequence_number] = pkt
@@ -589,11 +605,11 @@ class Peer:
 
 
     def save_file(self):
+        self.STR_arrived = False # to signal sending checker to end
         self.get_end_time()
         self.clear_queue()
         while True:
             print("Path to save directory [--quit]: ")
-            # TODO: possible to replace with classic input()
             url = self.INPUT.get()
             if url == '\n':
                 continue
@@ -612,12 +628,21 @@ class Peer:
         print("INFO: File saved successfully to: " + url + "\\" + self.file_name + "-" + str(self.file_data.__sizeof__()//1024) + "KB")
         if self.get_transmission_time():
             print(f"INFO: File received time-{(self.trans_time//60):.0f}m:{(self.trans_time%60):.2f}s")
-        self.clear_file_buffers()
+        self.SENDER.queue_packet(Packet.build(Flags.MSG_F.value, sequence_number=self.ConnInfo.dest_seq, data=f"System: File-{self.file_name} received in {self.trans_time:.2} sec.".encode()))
+        threading.Timer(0.5, self.clear_file_buffers).start()
 
     def clear_file_buffers(self):
         self.file_name = ""
         self.file_data = bytes(0)
+        # god damn ugly
+        if self.sending_err:
+            for seq, pkt in self.file_buffer.items():
+                if seq + pkt.seq_offset + 1 > self.ConnInfo.current_seq:
+                    self.ConnInfo.current_seq = seq + pkt.seq_offset + 1
         self.file_buffer = {}
+        self.STR_arrived = False
+        self.sending_err = False
+        print("INFO: stored data cleared")
 
     def incoming_file(self, pkt):
         if pkt.sequence_number != self.ConnInfo.current_seq:
@@ -627,6 +652,10 @@ class Peer:
         print("INFO: Halting menu")
         self.update_current(pkt.seq_offset + 1)
         self.send_ack(pkt)
+
+        self.STR_arrived = True
+        self.time_incoming()
+        threading.Thread(target=self.file_receiving_thread).start()
     # the thread will start if it didn't receive a file packet in a longer time it's going to clear buffer
     # But I also need to take care of loosing conection as that can trigger buffer clearing
     def get_start_time(self):
@@ -646,6 +675,3 @@ class Peer:
             self.start_time = 0
             return True
         return False
-
-
-

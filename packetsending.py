@@ -80,6 +80,7 @@ class SlidingWindow:
 
     def clear_dictionary(self):
         with self._lock:
+            self._size = 0
             self._dict.clear()
 
     def contains(self, sequence_number):
@@ -98,37 +99,44 @@ class Sender:
         self.Hard_limit = False
         self.WIN_limit = win_limit
         #timer
-        self.window_timer = 0.1
+        self.retransmit_timer = 0.1
+        self.clearing_queue = False
 
 
 
     def queue_packet(self, pkt):
         if isinstance(pkt, Packet):
             self.PACKETS.put(pkt)
-        # its gonna be a list ok?
+
         else:
             [self.PACKETS.put(pkt[i]) for i in range(len(pkt))]
+        print("DBG: packet added to queue")
 
 
 ### Retransmitting
     def send_from_window(self, ack_sequence_number):
         packet_to_send = self.WINDOW.get(ack_sequence_number).to_bytes()
-        # packet_to_send = simulate_packet_corruption(packet_to_send, 0.2)
+
+### KORUPCIA DAT
+        packet_to_send = simulate_packet_corruption(packet_to_send, 0.1)
 
         with self.send_lock:
             self.socket.sendto(packet_to_send, (self.ConnInfo.dest_ip, self.ConnInfo.dest_port))
             # print("DBG: sent pkt from window " + str(ack_sequence_number))
 
     def retransmit(self, ack_sequence_number):
-        counter = 0
-        while self.ConnInfo.CONNECTION:
+        st = time.time()
+        dt = 0
+        while dt < 15 and self.ConnInfo.CONNECTION:
             #if its still in the window Im going to assume it was not acknowledged
             if self.WINDOW.contains(ack_sequence_number):
                 self.send_from_window(ack_sequence_number)
             else:
                 return
-            time.sleep(self.window_timer)
-            counter += 1
+            time.sleep(self.retransmit_timer)
+            dt = time.time() - st
+        if not self.clearing_queue:
+            self.end_packet_sending()
 ### main
 
     def run(self):
@@ -137,9 +145,9 @@ class Sender:
             while (not self.ConnInfo.CONNECTION
                    or self.WINDOW.__len__() >= self.WIN_limit):
                 time.sleep(0.1)
-
+            while self.clearing_queue: time.sleep(0.1)
             while self.WINDOW.__len__() < self.WIN_limit:
-                s_pkt = self.PACKETS.get() # blocking should matter much here
+                s_pkt = self.PACKETS.get() # blocking shouldnt matter much here
                 # line | offset for data size | 1 for expected acknowledge
                 ack_seq = s_pkt.sequence_number + s_pkt.seq_offset + 1
                 self.WINDOW.add(ack_seq, s_pkt)
@@ -150,10 +158,13 @@ class Sender:
     # TODO: I don't know if this is going to work
     def end_packet_sending(self):
         # how the clear window of
+        self.clearing_queue = True
         print("ERROR: Failure to send packets... clearing cached packets")
-        self.WINDOW.clear_dictionary()
-        try:
-            while True:
+        while True:
+            try:
                 self.PACKETS.get_nowait()
-        except queue.Empty:
-            return
+            except queue.Empty:
+                self.WINDOW.clear_dictionary()
+                print("INFO: Cached packets cleared")
+                self.clearing_queue = False
+                return
