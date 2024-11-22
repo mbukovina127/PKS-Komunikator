@@ -7,7 +7,7 @@ import socket
 import sys
 import threading
 import time
-
+from ast import parse
 
 from packet import Packet, Flags
 from packetsending import ThreadingSet, Sender, SlidingWindow
@@ -64,6 +64,7 @@ class Peer:
         self.menu_halt = asyncio.Event()
 
     ### DATA
+        self.RECEIVED = queue.Queue()
         self.SENT = ThreadingSet()
         self.INPUT = queue.Queue()
         self.WINDOW = SlidingWindow()
@@ -165,7 +166,12 @@ class Peer:
             print(f"INFO: Packet-{pkt.sequence_number} received -- fail")
             return False
 
-    #TODO: this could be another thread that takes from the queue of received packets
+    def PARSER(self):
+        while True:
+            pkt = self.RECEIVED.get()
+            self.parse_packet(pkt)
+
+
     def parse_packet(self, pkt: Packet):
         self.time_epoch()
         # print(f"DBG: dsq - {self.ConnInfo.dest_seq} csq - {self.ConnInfo.current_seq}")
@@ -217,7 +223,10 @@ class Peer:
         while self.ConnInfo.CONNECTION:
             try:
                 rec_pkt = self.recv_packet(buffer_s)
-                self.parse_packet(rec_pkt)
+                try:
+                    self.RECEIVED.put_nowait(rec_pkt)
+                except queue.Full:
+                    continue
             except socket.timeout:
                 pass
             except SystemExit:
@@ -349,7 +358,9 @@ class Peer:
         listening = threading.Thread(target=self.LISTENER, args=(1500,))
         keep_alive = threading.Thread(target=self.KEEP_ALIVE)
         sending = threading.Thread(target=self.SENDER.run)
+        parser = threading.Thread(target=self.PARSER)
         listening.start()
+        parser.start()
         sending.start()
         keep_alive.start()
 
@@ -358,6 +369,7 @@ class Peer:
         listening.join()
         keep_alive.join(0)
         sending.join(0)
+        parser.join(0)
 
 ### INPUT
     def handle_input(self):

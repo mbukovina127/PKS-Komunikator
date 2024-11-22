@@ -99,7 +99,7 @@ class Sender:
         self.Hard_limit = False
         self.WIN_limit = win_limit
         #timer
-        self.retransmit_timer = 0.1
+        self.retransmit_timer = 0.4
         self.clearing_queue = False
 
 
