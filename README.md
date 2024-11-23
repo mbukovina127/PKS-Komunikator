@@ -10,7 +10,7 @@ PKS 2024 (tester: Filip Brutovský)
   - [x] Keep Alive
   - [x] Closing connection
 - [x] Menu
-  - [ ] is decent
+  - [x] is decent
 
 ### 2. - 3. Prenos textu/súboru - fragmentácia
 - [x] Menu funkcionalita "meh"
@@ -27,15 +27,15 @@ PKS 2024 (tester: Filip Brutovský)
 ### 4. Udržanie spojenia (Keep-Alive)
 - [x] Jednoducha implementacia
 - [x] Mutex
-- [ ] "tri neprijate spravy" treba skontrolovat  
-- [ ] "sprava o ukonceni" treba skontrolovat
+- [x] "tri neprijate spravy" treba skontrolovat  
+- [x] "sprava o ukonceni" treba skontrolovat
 - [ ] Reagovanie počas prenosov
 
 ### 5. Lua skript vo Wiresharku
-- [ ] Done
+- [x] Done
 
 ### 6. Finálna dokumentácia
-- [ ] Done 
+- [x] Done 
 
 
 # Podmienky
