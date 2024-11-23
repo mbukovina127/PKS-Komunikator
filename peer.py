@@ -476,6 +476,7 @@ class Peer:
         self.SENDER.queue_packet(msg_chunks)
 
     def print_MSG(self):
+        self.get_end_time()
         if self.get_transmission_time():
             # print(f"DBG: {self.trans_time}")
             print(f"INFO: Transmission time-{(self.trans_time // 60):.0f}m:{(self.trans_time % 60):.2f}s")
@@ -486,8 +487,8 @@ class Peer:
     def process_MSG(self, pkt: Packet):
         # print("DBG: processing MSG packet... message thus far: " + self.message)
         if pkt.flag == Flags.MSG.value:
-            self.get_start_time()
             if pkt.sequence_number == self.ConnInfo.current_seq:
+                self.get_start_time()
                 # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message += pkt.data.decode()
                 self.update_current(pkt.seq_offset + 1)
@@ -497,14 +498,11 @@ class Peer:
                     self.message += pkt.data.decode()
                     self.update_current(pkt.seq_offset + 1)
                     if pkt.flag == Flags.MSG_F.value:
-                        self.get_end_time()
                         self.print_MSG()
 
-                # set the ok time
-                self.time_incoming()
-
             elif pkt.sequence_number > self.ConnInfo.current_seq:
-#                 print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
+                self.get_start_time()
+                # print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.message_buffer[pkt.sequence_number] = pkt
 
         else:  # only other one is MSG_F
@@ -512,7 +510,6 @@ class Peer:
 #                 print("DBG: Fin is in order")
                 self.message += pkt.data.decode()
                 self.update_current(pkt.seq_offset + 1)
-                self.get_end_time()
                 self.print_MSG()
             else:
 #                 print("DBG: Fin is out of order... pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
@@ -567,8 +564,8 @@ class Peer:
 
     def process_frag(self, pkt):
         if pkt.flag == Flags.FRAG.value:
-            self.get_start_time()
             if pkt.sequence_number == self.ConnInfo.current_seq:
+                self.get_start_time()
                 # print("DBG: packet is in order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.file_data += pkt.data
                 self.update_current(pkt.seq_offset + 1)
@@ -578,10 +575,10 @@ class Peer:
                     self.file_data += pkt.data
                     self.update_current(pkt.seq_offset + 1)
                     if pkt.flag == Flags.FRAG_F.value:
-                        self.get_end_time()
                         threading.Thread(target=self.save_file).start()
                 self.time_incoming()
             elif pkt.sequence_number > self.ConnInfo.current_seq:
+                self.get_start_time()
 #                 print("DBG: packet is out of order.. pkts seq: " + str(pkt.sequence_number) + ".. mine is: " + str(self.ConnInfo.current_seq))
                 self.file_buffer[pkt.sequence_number] = pkt
 
@@ -590,7 +587,6 @@ class Peer:
 #                 print("DBG: Fin is in order")
                 self.file_data += pkt.data
                 self.update_current(pkt.seq_offset + 1)
-                self.get_end_time()
                 threading.Thread(target=self.save_file).start()
             else:
 #                 print("DBG: Fin is out of order")
