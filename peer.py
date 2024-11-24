@@ -230,9 +230,9 @@ class Peer:
             except socket.timeout:
                 pass
             except SystemExit:
-                return
+                os._exit(1)
             except OSError:
-                return
+                os._exit(1)
 
 ### Terminating fucntions
 
@@ -260,7 +260,7 @@ class Peer:
         self.listening_socket.close()
         self.transmitting_socket.close()
         print("INFO: Offline")
-        sys.exit(0)
+        os._exit(0)
 ### KEEP ALIVE FUNCTION
 
     def KEEP_ALIVE(self):
@@ -271,7 +271,7 @@ class Peer:
                 if self.ConnInfo.pulse < 0:
                     self.ConnInfo.CONNECTION = False
                     print("INFO: Keep alive - connection lost - no reply")
-                    sys.exit(13)
+                    os._exit(13)
                 self.send_packet(Packet.build(flags=Flags.KEEP_ALIVE.value))
                 with self.ka_lock:
                     self.ConnInfo.pulse -= 1
@@ -633,7 +633,7 @@ class Peer:
 
         with open(url + "\\" + self.file_name, "wb") as file:
             file.write(self.file_data)
-        print("INFO: File saved successfully to: " + url + "\\" + self.file_name + "-" + str(self.file_data.__sizeof__()//1024) + "KB")
+        print("INFO: File saved successfully to: " + url + "\\" + self.file_name + "-" + str(len(self.file_data)//1024) + "KB")
         if self.get_transmission_time():
             print(f"INFO: File received time-{(self.trans_time//60):.0f}m:{(self.trans_time%60):.2f}s")
         self.SENDER.queue_packet(Packet.build(Flags.MSG_F.value, sequence_number=self.ConnInfo.dest_seq, data=f"System: File-{self.file_name} received in {self.trans_time:.2} sec.".encode()))
