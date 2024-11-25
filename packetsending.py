@@ -115,8 +115,11 @@ class Sender:
 
 ### Retransmitting
     def send_from_window(self, ack_sequence_number):
-        packet_to_send = self.WINDOW.get(ack_sequence_number).to_bytes()
-
+        packet_to_send = self.WINDOW.get(ack_sequence_number)
+        if isinstance(packet_to_send, Packet):
+            packet_to_send = packet_to_send.to_bytes()
+        else:
+            return 
 ### KORUPCIA DAT
         packet_to_send = simulate_packet_corruption(packet_to_send, 0.1)
 
