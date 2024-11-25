@@ -110,8 +110,6 @@ class Sender:
 
         else:
             [self.PACKETS.put(pkt[i]) for i in range(len(pkt))]
-        print("DBG: packet added to queue")
-
 
 ### Retransmitting
     def send_from_window(self, ack_sequence_number):
@@ -119,7 +117,7 @@ class Sender:
         if isinstance(packet_to_send, Packet):
             packet_to_send = packet_to_send.to_bytes()
         else:
-            return 
+            return
 ### KORUPCIA DAT
         packet_to_send = simulate_packet_corruption(packet_to_send, 0.1)
 
@@ -157,8 +155,6 @@ class Sender:
                 # print("DBG: packet in window")
                 threading.Thread(target=self.retransmit, args=(ack_seq,)).start()
 
-
-    # TODO: I don't know if this is going to work
     def end_packet_sending(self):
         # how the clear window of
         self.clearing_queue = True

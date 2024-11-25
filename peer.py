@@ -15,11 +15,6 @@ from packetsending import ThreadingSet, Sender, SlidingWindow
 HEADER_SIZE = 7
 MAX_SEQ_NUMBER = 4_000_000_000
 
-# TODO: terminate file sending a vycistit cache suboru
-#       co ak nam nikdy nepride ocakavany seq num ale keep alive funguje
-#       potrebujeme dat casovy limit ak nepride packet ktory updatne seq number
-#       ak nic nepride potrebujeme prestat posielat subory
-
 class ConnInfo:
     def __init__(self, ip, port_lst, port_trs):
         self.dest_ip = ip
@@ -132,10 +127,10 @@ class Peer:
         self.ok_time = time.time()
 
     def file_receiving_thread(self):
-        print(f"DBG: started checking")
+        # print(f"DBG: started checking")
         while self.STR_arrived:
             # if the last in order packet arrived less than 10 seconds ago
-            print(f"DBG: checking time: {time.time() - self.ok_time} with ok time being: {self.ok_time}" )
+            # print(f"DBG: checking time: {time.time() - self.ok_time} with ok time being: {self.ok_time}" )
             if time.time() - self.ok_time > 15:
                 if not self.sending_err:
                     print("ERROR: Incorrect data arriving for 15 seconds clearing stored data in 5 seconds... ")
