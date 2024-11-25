@@ -29,7 +29,7 @@ PKS 2024 (tester: Filip Brutovský)
 - [x] Mutex
 - [x] "tri neprijate spravy" treba skontrolovat  
 - [x] "sprava o ukonceni" treba skontrolovat
-- [ ] Reagovanie počas prenosov
+- [x] Reagovanie počas prenosov
 
 ### 5. Lua skript vo Wiresharku
 - [x] Done
