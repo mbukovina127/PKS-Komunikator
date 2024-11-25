@@ -1,14 +1,14 @@
 -- Define a custom protocol atop UDP
-local p_custom = Proto("customproto", "Custom Protocol over UDP")
+local p_mine = Proto("myprotocol", "Custom Protocol over UDP")
 
 -- Define protocol fields
-local f_flag = ProtoField.uint8("customproto.flag", "Flag", base.DEC)
-local f_seq_num = ProtoField.uint32("customproto.seq_num", "Sequence Number", base.DEC)
-local f_data = ProtoField.bytes("customproto.data", "Data")
-local f_checksum = ProtoField.uint16("customproto.checksum", "Checksum", base.HEX)
+local f_flag = ProtoField.uint8("myprotocol.flag", "Flag", base.DEC)
+local f_seq_num = ProtoField.uint32("myprotocol.seq_num", "Sequence Number", base.DEC)
+local f_data = ProtoField.bytes("myprotocol.data", "Data")
+local f_checksum = ProtoField.uint16("myprotocol.checksum", "Checksum", base.HEX)
 
 -- Add fields to the protocol
-p_custom.fields = { f_flag, f_seq_num, f_data, f_checksum }
+p_mine.fields = { f_flag, f_seq_num, f_data, f_checksum }
 
 
 --  SYN = 1
@@ -35,7 +35,7 @@ local flag_meanings = {
     -- Add more flag mappings here as needed
 }
 -- Dissector function
-function p_custom.dissector(buffer, pinfo, tree)
+function p_mine.dissector(buffer, pinfo, tree)
     -- Check packet length
     local pkt_len = buffer:len()
     if pkt_len < 7 then
@@ -45,7 +45,7 @@ function p_custom.dissector(buffer, pinfo, tree)
     pinfo.cols.protocol = "Bukovina"
 
     -- Create protocol tree
-    local subtree = tree:add(p_custom, buffer(), "Custom Protocol Data")
+    local subtree = tree:add(p_mine, buffer(), "Custom Protocol Data")
 
     -- Extract fields
     local flag = buffer(0, 1) -- First byte
@@ -68,4 +68,6 @@ function p_custom.dissector(buffer, pinfo, tree)
 end
 
 -- Register protocol
-p_custom:register_heuristic("udp", p_custom.dissector)
+local udp_dissector_table = DissectorTable.get("udp.port")
+udp_dissector_table:add(50601, p_mine)
+udp_dissector_table:add(50602, p_mine)
